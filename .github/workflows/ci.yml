@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   verify:
-    name: ${{ matrix.os }} / Node 22.13
+    name: ${{ matrix.os }} / Node 22.18
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -35,7 +35,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22.13.0
+          node-version: 22.18.0
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -43,10 +43,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .next/cache
-          key: ${{ runner.os }}-next-node22-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**', 'src/**', 'next.config.ts', 'tsconfig.json') }}
+          key: ${{ runner.os }}-next-node22.18-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**', 'src/**', 'next.config.ts', 'tsconfig.json') }}
           restore-keys: |
-            ${{ runner.os }}-next-node22-${{ hashFiles('package-lock.json') }}-
-            ${{ runner.os }}-next-node22-
+            ${{ runner.os }}-next-node22.18-${{ hashFiles('package-lock.json') }}-
+            ${{ runner.os }}-next-node22.18-
 
       - name: Install dependencies
         run: npm ci
