@@ -1,20 +1,54 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+import Script from "next/script";
 import "./globals.css";
 
-const repositoryName =
-  process.env.GITHUB_REPOSITORY?.split("/")[1] ?? "green-hell-web";
-const assetPrefix =
-  process.env.GITHUB_ACTIONS === "true" ? `/${repositoryName}` : "";
-
 export const metadata: Metadata = {
-  title: "绿色地狱网页版｜亚马逊生存日志",
-  description: "一场可交互的亚马逊雨林生存实验：检查伤口、管理水分与理智，在第一个雨夜来临前生起营火。",
-  icons: {
-    icon: `${assetPrefix}/favicon.svg`,
-    shortcut: `${assetPrefix}/favicon.svg`,
+  metadataBase: new URL("https://green-hell-survival-cn.xingzhihen.chatgpt.site"),
+  title: "CANOPY: First Night｜雨林第一夜",
+  description: "一款原创第一人称硬核雨林生存网页版：诊断伤口、净化水源、建立营地，并在暴雨后取回信标电池。",
+  applicationName: "CANOPY: First Night",
+  category: "game",
+  keywords: ["雨林生存", "网页游戏", "第一人称", "survival game", "Three.js"],
+  authors: [{ name: "CANOPY Web Game Project" }],
+  creator: "CANOPY Web Game Project",
+  openGraph: {
+    type: "website",
+    url: "/",
+    locale: "zh_CN",
+    title: "CANOPY: First Night｜雨林第一夜",
+    description: "雨林不会给你答案。观察、诊断、准备，然后活着回来。",
+    siteName: "CANOPY: First Night",
+    images: [
+      {
+        url: "/og-canopy-first-night.png",
+        alt: "暴雨中的原创低多边形雨林营地、坠毁飞机与远方气象站",
+      },
+    ],
   },
+  twitter: {
+    card: "summary_large_image",
+    title: "CANOPY: First Night",
+    description: "观察环境、处理伤口、建立营地，在暴雨夜发出求救信号。",
+    images: ["/og-canopy-first-night.png"],
+  },
+  alternates: { canonical: "/" },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#06140e",
+  colorScheme: "dark",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="zh-CN"><body>{children}</body></html>;
+  return (
+    <html lang="zh-CN">
+      <body>
+        {children}
+        <Script src="https://s1.hdslb.com/bfs/seed/toy/app/sdk/toy-sdk.js" strategy="afterInteractive" />
+      </body>
+    </html>
+  );
 }

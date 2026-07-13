@@ -1,20 +1,14 @@
 import type { NextConfig } from "next";
 
-const isGitHubPages = process.env.GITHUB_ACTIONS === "true";
-const repositoryName =
-  process.env.GITHUB_REPOSITORY?.split("/")[1] ?? "green-hell-web";
-const basePath = isGitHubPages ? `/${repositoryName}` : "";
+const githubPagesBase =
+  process.env.DEPLOY_TARGET === "github-pages" ? "/green-hell-web" : undefined;
 
 const nextConfig: NextConfig = {
+  output: "export",
+  trailingSlash: true,
+  basePath: githubPagesBase,
+  assetPrefix: githubPagesBase,
   images: { unoptimized: true },
-  ...(isGitHubPages
-    ? {
-        output: "export" as const,
-        basePath,
-        assetPrefix: basePath,
-        trailingSlash: true,
-      }
-    : {}),
 };
 
 export default nextConfig;

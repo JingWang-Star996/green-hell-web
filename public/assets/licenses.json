@@ -1,0 +1,90 @@
+{
+  "manifestVersion": 1,
+  "project": "CANOPY: First Night",
+  "lastReviewed": "2026-07-13",
+  "scope": "Game visuals, interface art, 3D scene content, and audio generated or redistributed by the runtime. General npm dependencies and host-platform SDKs are outside this asset manifest and remain governed by their own terms.",
+  "originalProgrammaticAssets": [
+    {
+      "name": "Procedural rainforest scene",
+      "kind": "runtime-generated-visuals",
+      "sourceFiles": [
+        "src/game/render/RainforestRenderer.ts"
+      ],
+      "generatedFrom": [
+        "Three.js primitives",
+        "project-authored geometry, materials, lighting, fog, particles, and placement rules"
+      ],
+      "externalTextures": [],
+      "externalModels": [],
+      "license": "MIT",
+      "copyright": "Copyright (c) 2026 CANOPY: First Night contributors"
+    },
+    {
+      "name": "Synthesized rainforest ambience and interaction cues",
+      "kind": "runtime-generated-audio",
+      "sourceFiles": [
+        "src/game/audio/AudioEngine.ts"
+      ],
+      "generatedFrom": [
+        "Web Audio oscillators",
+        "project-authored filtered noise and envelope rules"
+      ],
+      "externalRecordings": [],
+      "license": "MIT",
+      "copyright": "Copyright (c) 2026 CANOPY: First Night contributors"
+    },
+    {
+      "name": "Programmatic interface visuals",
+      "kind": "css-generated-interface",
+      "sourceFiles": [
+        "app/globals.css",
+        "app/icon.svg"
+      ],
+      "generatedFrom": [
+        "project-authored CSS shapes, gradients, typography rules, and effects"
+      ],
+      "externalImages": [],
+      "license": "MIT",
+      "copyright": "Copyright (c) 2026 CANOPY: First Night contributors"
+    }
+  ],
+  "thirdPartyRenderingLibraries": [
+    {
+      "name": "three",
+      "displayName": "Three.js",
+      "version": "0.185.1",
+      "package": "https://www.npmjs.com/package/three/v/0.185.1",
+      "source": "https://github.com/mrdoob/three.js",
+      "homepage": "https://threejs.org/",
+      "license": "MIT",
+      "licenseUrl": "https://github.com/mrdoob/three.js/blob/r185/LICENSE",
+      "copyright": "Copyright © 2010-2026 three.js authors",
+      "usage": "Runtime WebGL rendering. This project does not redistribute Three.js example models, textures, fonts, or media assets."
+    }
+  ],
+  "runtimeHostIntegrations": [
+    {
+      "name": "Toy host SDK",
+      "source": "https://s1.hdslb.com/bfs/seed/toy/app/sdk/toy-sdk.js",
+      "provider": "Toy host platform",
+      "bundled": false,
+      "license": "Platform-provided runtime; governed by the host platform terms",
+      "usage": "Optional cloud-save bridge and start/continue/win/loss action reporting. When the host is absent or rejects a request, local gameplay and local saves remain available.",
+      "data": "A project-generated random device identifier and the versioned game save envelope may be synchronized by the host. The project does not request a name, email address, or precise location."
+    }
+  ],
+  "generatedRasterAssets": [
+    {
+      "name": "CANOPY: First Night social sharing artwork",
+      "kind": "AI-generated original key art",
+      "file": "public/og-canopy-first-night.png",
+      "generator": "OpenAI built-in image generation tool",
+      "created": "2026-07-14",
+      "promptSummary": "Original stylized low-poly rainforest camp, damaged expedition aircraft, survivor silhouette, storm, stream, and distant weather station; no text, logo, official game asset, or recognizable character.",
+      "license": "Project-owned generated asset, distributed with this project",
+      "copyright": "Copyright (c) 2026 CANOPY: First Night contributors"
+    }
+  ],
+  "registeredExternalGameAssets": [],
+  "statement": "No third-party image, texture, 3D model, font, or recorded-audio asset is registered or redistributed as CANOPY game content in this manifest. The social artwork is an original generated project asset. Do not add an external asset to the product until its source, author, exact license, and required attribution have been verified and recorded here."
+}

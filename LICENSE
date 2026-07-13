@@ -1,0 +1,43 @@
+MIT License
+
+Copyright (c) 2026 CANOPY: First Night contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Scope clarification
+-------------------
+
+This MIT License applies only to original project code and other original
+material in this repository to the extent that its copyright is owned by the
+CANOPY: First Night contributors.
+
+It does not grant or imply any license to:
+
+1. third-party libraries, dependencies, fonts, images, audio, models, data, or
+   other third-party material, each of which remains subject to its own terms;
+2. trademarks, service marks, trade dress, logos, product names, game titles,
+   character names, or other source identifiers, including the names CANOPY:
+   First Night, Green Hell, Creepy Jar, or marks owned by their respective
+   owners; or
+3. any material that a contributor does not have the right to license.
+
+No affiliation with, endorsement by, sponsorship by, or authorization from
+Creepy Jar is stated or implied. See public/assets/licenses.json for the
+runtime asset and rendering-library provenance recorded by this project.
+
