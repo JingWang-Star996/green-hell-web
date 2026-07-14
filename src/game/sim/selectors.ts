@@ -1,4 +1,9 @@
 import { ITEMS, RECIPES, TASKS, TASK_SEQUENCE } from "./content";
+import {
+  getDurableToolInventoryStatus,
+  getPerishableInventoryStatus,
+} from "./lifecycle";
+import { DURABLE_TOOL_IDS, PERISHABLE_ITEM_IDS } from "./types";
 import type {
   CraftCheck,
   GameEvent,
@@ -223,6 +228,22 @@ export interface SimulationViewEntity {
   nextRegenerationTick: number | null;
 }
 
+export interface SimulationPerishableView {
+  itemId: (typeof PERISHABLE_ITEM_IDS)[number];
+  quantity: number;
+  nextExpiryTick: number | null;
+  secondsUntilNextSpoilage: number | null;
+  shelfLifeSeconds: number;
+}
+
+export interface SimulationDurableToolView {
+  itemId: (typeof DURABLE_TOOL_IDS)[number];
+  quantity: number;
+  durabilities: number[];
+  activeDurability: number;
+  maxDurability: number;
+}
+
 export interface SimulationView {
   status: GameState["status"];
   player: Vec3;
@@ -249,6 +270,10 @@ export interface SimulationView {
   };
   worldEntities: SimulationViewEntity[];
   inventory: Inventory;
+  inventoryLifecycle: {
+    perishables: SimulationPerishableView[];
+    tools: SimulationDurableToolView[];
+  };
   vitals: VitalsState & GameState["player"]["nutrition"];
   objectives: {
     currentTaskId: GameState["objectives"]["currentTaskId"];
@@ -301,6 +326,14 @@ export function selectGameView(state: GameState): SimulationView {
       }))
       .sort((left, right) => left.id.localeCompare(right.id)),
     inventory: { ...state.inventory },
+    inventoryLifecycle: {
+      perishables: PERISHABLE_ITEM_IDS.map((itemId) => ({
+        ...getPerishableInventoryStatus(state, itemId),
+      })),
+      tools: DURABLE_TOOL_IDS.map((itemId) => ({
+        ...getDurableToolInventoryStatus(state, itemId),
+      })),
+    },
     vitals: {
       ...state.player.vitals,
       ...state.player.nutrition,

@@ -38,7 +38,7 @@ export function Hud({
           <div className="compass-track"><i style={{ transform: `translateX(${((compassDegrees % 45) / 45) * 42 - 21}px)` }} /></div>
         </div>
         <button className="clock-chip" onClick={onOpenWatch} aria-label="打开手表">
-          <span>DAY {String(watch.day).padStart(2, "0")}</span><strong>{watch.time}</strong><small>{watch.weather}</small>
+          <span>DAY {String(watch.day).padStart(2, "0")}</span><strong>{watch.time}</strong><small>{watch.weather} · {watch.biome}</small>
         </button>
       </header>
 

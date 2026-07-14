@@ -1,11 +1,26 @@
 import { ITEMS, RECIPES, TASKS, TASK_SEQUENCE } from "../sim/content";
+import { createEcologyState, projectEcologyForRender } from "../ecology";
+import {
+  BIOME_PROFILES,
+  WORLD_CHUNK_SIZE,
+  activeChunkCoordinates,
+  generateChunkDescriptor,
+  worldToChunkCoordinate,
+} from "../world/generation";
 import { canCraft, getDiscoveredRecipeIds, getSurvivalScore, hasInspectedLandmark, isAtCamp } from "../sim/selectors";
+import {
+  getDurableToolInventoryStatus,
+  getPerishableInventoryStatus,
+  isDurableTool,
+  isPerishableItem,
+} from "../sim/lifecycle";
 import type { GameEvent, GameState, ItemId, RecipeId } from "../sim/types";
 import type { RenderEntity, RenderEntityKind, RenderSnapshot } from "../render/types";
 import type {
   BodyView,
   EventView,
   InventoryItemView,
+  MapChunkView,
   MapLandmark,
   MeterView,
   ObjectiveView,
@@ -63,6 +78,7 @@ export type GameViewModel = {
   body: BodyView;
   events: EventView[];
   landmarks: MapLandmark[];
+  mapChunks: MapChunkView[];
   score: number;
 };
 
@@ -79,7 +95,7 @@ export function createGameViewModel(state: GameState, retainedRecipes: readonly 
     meter("energy", "能量", "NRG", state.player.vitals.energy, "energy"),
     meter("sanity", "理智", "SAN", state.player.vitals.sanity, "sanity"),
   ];
-  const objectives = TASK_SEQUENCE.map((id, index) => {
+  const objectives: ObjectiveView[] = TASK_SEQUENCE.map((id, index) => {
     const completed = state.objectives.completedTaskIds.includes(id);
     const current = state.objectives.currentTaskId === id;
     const presentation = objectivePresentation(state, id, completed || current);
@@ -93,6 +109,27 @@ export function createGameViewModel(state: GameState, retainedRecipes: readonly 
       current,
     };
   });
+  const currentChunk = generateChunkDescriptor(
+    String(state.seed),
+    worldToChunkCoordinate(state.player.position.x, state.player.position.z),
+  );
+  if (state.objectives.flags.sandboxContinued) {
+    const lowWater = state.player.nutrition.hydration < 35;
+    const noFood = state.inventory["palm-fruit"] + state.inventory["brazil-nuts"] + state.inventory.grubs === 0;
+    objectives.push({
+      id: "living-forest",
+      label: `调查${BIOME_PROFILES[currentChunk.biome].label}`,
+      description: "观察天气和动物活动，完成一次采集—返营—加工—维修循环；跨过区块边界会生成新的地形与生态。",
+      progressLabel: `持续远征 · DAY ${String(state.clock.day).padStart(2, "0")}`,
+      blocker: lowWater
+        ? "水分低于 35；先寻找水源或返回营地补水。"
+        : noFood
+          ? "背包没有食物；注意腐败时间，优先寻找可持续补给。"
+          : undefined,
+      completed: false,
+      current: true,
+    });
+  }
   return {
     render: toRenderSnapshot(state),
     watch: {
@@ -100,6 +137,7 @@ export function createGameViewModel(state: GameState, retainedRecipes: readonly 
       time: formatClock(state.clock.minuteOfDay),
       coordinates: formatCoordinates(state.player.position.x, state.player.position.z),
       weather: state.weather.storm ? "强暴雨" : state.weather.rainIntensity > 0.55 ? "降雨" : state.weather.rainIntensity > 0.15 ? "阵雨" : "闷热",
+      biome: BIOME_PROFILES[currentChunk.biome].label,
       rain: state.weather.rainIntensity,
       meters: nutritionMeters,
     },
@@ -120,12 +158,24 @@ export function createGameViewModel(state: GameState, retainedRecipes: readonly 
     },
     events: state.eventLog.slice(-30).reverse().map(toEventView),
     landmarks: createLandmarkViews(state),
+    mapChunks: createMapChunkViews(state),
     score: getSurvivalScore(state),
   };
 }
 
 function toRenderSnapshot(state: GameState): RenderSnapshot {
+  const activeChunks = activeChunkCoordinates(
+    state.player.position.x,
+    state.player.position.z,
+    1,
+  ).map((coordinate) => generateChunkDescriptor(String(state.seed), coordinate));
+  const ecology = state.ecology ?? createEcologyState(state.seed, {
+    tick: state.clock.tick,
+    rainIntensity: state.weather.rainIntensity,
+    activeChunks,
+  });
   return {
+    worldSeed: String(state.seed),
     day: state.clock.day,
     minuteOfDay: state.clock.minuteOfDay,
     rain: state.weather.rainIntensity,
@@ -137,7 +187,19 @@ function toRenderSnapshot(state: GameState): RenderSnapshot {
     beaconBuilt: state.camp.beaconBuilt,
     signalActive: state.objectives.flags.transmitted,
     canSprint: state.player.vitals.stamina > 1,
-    entities: Object.values(state.world.entities).map((entity) => toRenderEntity(state, entity)),
+    entities: Object.values(state.world.entities)
+      .filter((entity) =>
+        Math.hypot(
+          entity.position.x - state.player.position.x,
+          entity.position.z - state.player.position.z,
+        ) <= WORLD_CHUNK_SIZE * 3,
+      )
+      .map((entity) => toRenderEntity(state, entity)),
+    wildlife: projectEcologyForRender(ecology, {
+      tick: state.clock.tick,
+      rainIntensity: state.weather.rainIntensity,
+      activeChunks,
+    }),
   };
 }
 
@@ -183,7 +245,26 @@ function createInventoryViews(state: GameState): InventoryItemView[] {
     if (ITEMS[id].edible) { action = "eat"; actionLabel = "食用"; }
     if (id === "clean-water" || id === "dirty-water") { action = "drink"; actionLabel = id === "clean-water" ? "饮用" : "冒险饮用"; }
     if (id === "bandage" || id === "antiparasitic-herb") { action = "use"; actionLabel = "使用"; }
-    return { id, label: ITEMS[id].label, count, description: ITEM_DESCRIPTIONS[id], category: CATEGORY_BY_ITEM[id], action, actionLabel };
+    let statusLabel: string | undefined;
+    let statusTone: InventoryItemView["statusTone"];
+    if (isPerishableItem(id) && count > 0) {
+      const status = getPerishableInventoryStatus(state, id);
+      const seconds = status.secondsUntilNextSpoilage ?? 0;
+      statusLabel =
+        seconds <= 0
+          ? "已经腐坏"
+          : seconds < 60
+            ? `约 ${Math.max(1, Math.ceil(seconds))} 秒后腐坏`
+            : `约 ${Math.ceil(seconds / 60)} 分钟后腐坏`;
+      const freshness = seconds / status.shelfLifeSeconds;
+      statusTone = freshness <= 0.15 ? "danger" : freshness <= 0.4 ? "warning" : "stable";
+    } else if (isDurableTool(id) && count > 0) {
+      const status = getDurableToolInventoryStatus(state, id);
+      statusLabel = `耐久 ${status.activeDurability}/${status.maxDurability}`;
+      const durability = status.activeDurability / status.maxDurability;
+      statusTone = durability <= 0.2 ? "danger" : durability <= 0.5 ? "warning" : "stable";
+    }
+    return { id, label: ITEMS[id].label, count, description: ITEM_DESCRIPTIONS[id], category: CATEGORY_BY_ITEM[id], action, actionLabel, statusLabel, statusTone };
   });
 }
 
@@ -248,10 +329,41 @@ function createLandmarkViews(state: GameState): MapLandmark[] {
   ];
 }
 
+function createMapChunkViews(state: GameState): MapChunkView[] {
+  const current = worldToChunkCoordinate(
+    state.player.position.x,
+    state.player.position.z,
+  );
+  const currentKey = `${current.x}:${current.z}`;
+  const keys = [...new Set([...(state.world.exploredChunks ?? []), currentKey])].slice(-121);
+  const colors: Record<keyof typeof BIOME_PROFILES, string> = {
+    "evergreen-rainforest": "#3f6742",
+    "river-wetland": "#5d806f",
+    "palm-grove": "#8a8a52",
+    swamp: "#354e43",
+    "rocky-highland": "#7d7869",
+  };
+  return keys.flatMap((key) => {
+    const [xText, zText] = key.split(":");
+    const x = Number(xText);
+    const z = Number(zText);
+    if (!Number.isInteger(x) || !Number.isInteger(z)) return [];
+    const descriptor = generateChunkDescriptor(String(state.seed), { x, z });
+    return [{
+      key,
+      x,
+      z,
+      biome: BIOME_PROFILES[descriptor.biome].label,
+      color: colors[descriptor.biome],
+      current: key === currentKey,
+    }];
+  });
+}
+
 function toEventView(event: GameEvent): EventView {
-  const danger = ["game-lost", "parasite-contracted", "snake-bite"].includes(event.type);
-  const warning = ["fire-extinguished", "craft-failed", "command-rejected", "weather-changed"].includes(event.type);
-  const good = ["craft-succeeded", "recipe-discovered", "landmark-inspected", "wound-treated", "water-purified", "rest-completed", "task-completed", "game-won", "threat-avoided"].includes(event.type);
+  const danger = ["game-lost", "parasite-contracted", "snake-bite", "food-spoiled", "tool-broken"].includes(event.type);
+  const warning = ["fire-extinguished", "craft-failed", "command-rejected", "weather-changed", "tool-damaged"].includes(event.type);
+  const good = ["craft-succeeded", "recipe-discovered", "landmark-inspected", "wound-treated", "water-purified", "rest-completed", "task-completed", "game-won", "sandbox-continued", "threat-avoided"].includes(event.type);
   return {
     id: event.id,
     time: formatClock(14 * 60 + event.elapsedSeconds * 1.2),

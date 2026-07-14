@@ -3,7 +3,15 @@ import {
   TASK_SEQUENCE,
   WORLD_ENTITY_TEMPLATES,
 } from "./content";
+import { createEcologyState } from "../ecology";
+import {
+  activeChunkCoordinates,
+  chunkKey,
+  generateChunkDescriptor,
+  worldToChunkCoordinate,
+} from "../world/generation";
 import { createRngChannels, hashSeed } from "./rng";
+import { ensureItemLifecycleState } from "./lifecycle";
 import { ITEM_IDS } from "./types";
 import type {
   GameState,
@@ -13,6 +21,13 @@ import type {
 } from "./types";
 
 export const SIMULATION_VERSION = 1 as const;
+export const DYNAMIC_WORLD_LIMIT = 1_000_000;
+
+function activeEcologyChunks(seed: number, x: number, z: number) {
+  return activeChunkCoordinates(x, z, 1).map((coordinate) =>
+    generateChunkDescriptor(String(seed), coordinate),
+  );
+}
 
 export function createEmptyInventory(): Inventory {
   return Object.fromEntries(ITEM_IDS.map((itemId) => [itemId, 0])) as Inventory;
@@ -44,6 +59,11 @@ function createWorldEntities(): Record<string, WorldEntity> {
 
 export function createInitialState(seed: Seed = 1): GameState {
   const normalizedSeed = hashSeed(seed);
+  const initialEcology = createEcologyState(normalizedSeed, {
+    tick: 0,
+    rainIntensity: 0.22,
+    activeChunks: activeEcologyChunks(normalizedSeed, 0, -5),
+  });
   return {
     version: SIMULATION_VERSION,
     seed: normalizedSeed,
@@ -83,6 +103,10 @@ export function createInitialState(seed: Seed = 1): GameState {
       },
     },
     inventory: createEmptyInventory(),
+    itemLifecycle: {
+      perishables: {},
+      tools: {},
+    },
     weather: {
       rainIntensity: 0.22,
       targetRainIntensity: 0.22,
@@ -103,9 +127,17 @@ export function createInitialState(seed: Seed = 1): GameState {
       beaconBuilt: false,
     },
     world: {
-      bounds: { minX: -60, maxX: 60, minZ: -60, maxZ: 60 },
+      bounds: {
+        minX: -DYNAMIC_WORLD_LIMIT,
+        maxX: DYNAMIC_WORLD_LIMIT,
+        minZ: -DYNAMIC_WORLD_LIMIT,
+        maxZ: DYNAMIC_WORLD_LIMIT,
+      },
       entities: createWorldEntities(),
+      exploredChunks: [chunkKey(worldToChunkCoordinate(0, -5))],
+      generatedResourceChunks: [],
     },
+    ecology: initialEcology,
     objectives: {
       currentTaskId: TASK_SEQUENCE[0],
       completedTaskIds: [],
@@ -148,6 +180,24 @@ export function cloneGameState(state: GameState): GameState {
       },
     },
     inventory: { ...state.inventory },
+    itemLifecycle: state.itemLifecycle
+      ? {
+          perishables: Object.fromEntries(
+            Object.entries(state.itemLifecycle.perishables).map(
+              ([itemId, batches]) => [
+                itemId,
+                batches?.map((batch) => ({ ...batch })),
+              ],
+            ),
+          ),
+          tools: Object.fromEntries(
+            Object.entries(state.itemLifecycle.tools).map(([itemId, tools]) => [
+              itemId,
+              tools?.map((tool) => ({ ...tool })),
+            ]),
+          ),
+        }
+      : undefined,
     weather: { ...state.weather },
     camp: {
       ...state.camp,
@@ -156,6 +206,12 @@ export function cloneGameState(state: GameState): GameState {
     },
     world: {
       bounds: { ...state.world.bounds },
+      exploredChunks: state.world.exploredChunks
+        ? [...state.world.exploredChunks]
+        : undefined,
+      generatedResourceChunks: state.world.generatedResourceChunks
+        ? [...state.world.generatedResourceChunks]
+        : undefined,
       entities: Object.fromEntries(
         Object.entries(state.world.entities).map(([id, entity]) => [
           id,
@@ -170,6 +226,17 @@ export function cloneGameState(state: GameState): GameState {
         ]),
       ),
     },
+    ecology: state.ecology
+      ? {
+          ...state.ecology,
+          populations: Object.fromEntries(
+            Object.entries(state.ecology.populations).map(([key, population]) => [
+              key,
+              { ...population },
+            ]),
+          ),
+        }
+      : undefined,
     objectives: {
       ...state.objectives,
       completedTaskIds: [...state.objectives.completedTaskIds],
@@ -181,4 +248,43 @@ export function cloneGameState(state: GameState): GameState {
       details: event.details ? { ...event.details } : undefined,
     })),
   };
+}
+
+/** Upgrades a legacy version-1 save without mutating the persisted payload. */
+export function migrateGameState(state: GameState): GameState {
+  const migrated = cloneGameState(state);
+  ensureItemLifecycleState(migrated);
+  migrated.world.bounds = {
+    minX: -DYNAMIC_WORLD_LIMIT,
+    maxX: DYNAMIC_WORLD_LIMIT,
+    minZ: -DYNAMIC_WORLD_LIMIT,
+    maxZ: DYNAMIC_WORLD_LIMIT,
+  };
+  const currentChunkKey = chunkKey(
+    worldToChunkCoordinate(
+      migrated.player.position.x,
+      migrated.player.position.z,
+    ),
+  );
+  migrated.world.exploredChunks = [
+    ...new Set([...(migrated.world.exploredChunks ?? []), currentChunkKey]),
+  ].slice(-4096);
+  migrated.world.generatedResourceChunks ??= [];
+  migrated.objectives.flags.sandboxContinued ??= false;
+  if (
+    !migrated.ecology ||
+    migrated.ecology.version !== 1 ||
+    migrated.ecology.worldSeed !== String(migrated.seed)
+  ) {
+    migrated.ecology = createEcologyState(migrated.seed, {
+      tick: migrated.clock.tick,
+      rainIntensity: migrated.weather.rainIntensity,
+      activeChunks: activeEcologyChunks(
+        migrated.seed,
+        migrated.player.position.x,
+        migrated.player.position.z,
+      ),
+    });
+  }
+  return migrated;
 }

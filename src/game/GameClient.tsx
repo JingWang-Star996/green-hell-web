@@ -17,6 +17,7 @@ import type { InteractionTarget, PlayerFrame, TouchInput } from "./render/types"
 import {
   applyCommand,
   createInitialState,
+  migrateGameState,
   RECIPE_IDS,
   stepSimulation,
   type GameCommand,
@@ -83,8 +84,14 @@ export default function GameClient() {
 
   const dispatchCommand = useCallback((command: GameCommand) => {
     const current = stateRef.current;
-    if (!current || current.status !== "playing") return;
-    commitState(applyCommand(current, command));
+    if (!current) return;
+    if (current.status !== "playing" && command.type !== "continue-expedition") return;
+    const next = applyCommand(current, command);
+    commitState(next);
+    if (command.type === "continue-expedition" && next.status === "playing") {
+      enteredGameRef.current = false;
+      rendererRef.current?.setPaused(false);
+    }
   }, [commitState]);
   useEffect(() => {
     commandRef.current = dispatchCommand;
@@ -160,7 +167,7 @@ export default function GameClient() {
       void repository.load().then((result) => {
         if (generation !== loadGenerationRef.current || stateRef.current) return;
         if (result.ok && result.envelope.payload.status === "playing") {
-          savedStateRef.current = result.envelope.payload;
+          savedStateRef.current = migrateGameState(result.envelope.payload);
           setCanContinue(true);
         }
         refreshTimer = window.setTimeout(() => {
@@ -168,7 +175,7 @@ export default function GameClient() {
           void repository.refreshFromCloud().then((refresh) => {
             if (generation !== loadGenerationRef.current || stateRef.current) return;
             if ((refresh.status === "updated" || refresh.status === "up-to-date") && refresh.envelope.payload.status === "playing") {
-              savedStateRef.current = refresh.envelope.payload;
+              savedStateRef.current = migrateGameState(refresh.envelope.payload);
               setCanContinue(true);
             }
           });
@@ -261,9 +268,13 @@ export default function GameClient() {
             setHazardCaption(null);
             commandRef.current({ type: "encounter-hazard", entityId: hazardId });
           },
-          onHazardWarning: () => {
+          onHazardWarning: (hazardId) => {
             audioRef.current?.cue("warning");
-            setHazardCaption("附近草丛传来急促嘶声——放慢脚步，绕行或准备石矛。");
+            setHazardCaption(
+              hazardId.startsWith("wildlife:")
+                ? "林下传来压低的喘息与断枝声——捕食者正在附近活动，保持距离。"
+                : "附近草丛传来急促嘶声——放慢脚步，绕行或准备石矛。",
+            );
             if (hazardCaptionTimerRef.current !== null) window.clearTimeout(hazardCaptionTimerRef.current);
             hazardCaptionTimerRef.current = window.setTimeout(() => {
               hazardCaptionTimerRef.current = null;
@@ -490,6 +501,7 @@ export default function GameClient() {
         objectives={view.objectives}
         events={view.events}
         landmarks={view.landmarks}
+        mapChunks={view.mapChunks}
         score={view.score}
         audioEnabled={audioEnabled}
         reducedMotion={reducedMotion}
@@ -524,12 +536,12 @@ export default function GameClient() {
         onOpenBody={() => openPanel("body")}
       />
       {compatibilityError && <CompatibilityError message={compatibilityError} onRestart={() => setScreen("menu")} />}
-      {resolution && activePanel !== "notebook" && <ResolutionScreen state={gameState} score={view.score} onRestart={startNewGame} onNotebook={() => openPanel("notebook")} />}
+      {resolution && activePanel !== "notebook" && <ResolutionScreen state={gameState} score={view.score} onRestart={startNewGame} onNotebook={() => openPanel("notebook")} onContinue={() => dispatchCommand({ type: "continue-expedition" })} />}
     </main>
   );
 }
 
-function ResolutionScreen({ state, score, onRestart, onNotebook }: { state: GameState; score: number; onRestart: () => void; onNotebook: () => void }) {
+function ResolutionScreen({ state, score, onRestart, onNotebook, onContinue }: { state: GameState; score: number; onRestart: () => void; onNotebook: () => void; onContinue: () => void }) {
   const won = state.status === "won";
   const minutes = Math.max(1, Math.round(state.clock.elapsedSeconds / 60));
   const [dialogRef, handleDialogKeyDown] = useDialogFocus();
@@ -554,7 +566,8 @@ function ResolutionScreen({ state, score, onRestart, onNotebook }: { state: Game
           <div><small>生存评分</small><strong>{score}</strong></div>
         </div>
         <div className="start-actions">
-          <button className="button-primary" onClick={onRestart}>再次远征 <span>→</span></button>
+          {won && <button className="button-primary" onClick={onContinue}>继续留在雨林 <span>→</span></button>}
+          <button className={won ? "button-ghost" : "button-primary"} onClick={onRestart}>再次远征 <span>→</span></button>
           <button className="button-ghost" onClick={onNotebook}>查看因果日志</button>
         </div>
       </div>

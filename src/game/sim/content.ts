@@ -1,6 +1,8 @@
 import type {
+  DurableToolId,
   ItemDefinition,
   ItemId,
+  PerishableItemId,
   RecipeDefinition,
   RecipeId,
   ResourceRegenerationDefinition,
@@ -8,6 +10,32 @@ import type {
   TaskId,
   WorldEntityTemplate,
 } from "./types";
+
+export interface FoodSpoilageDefinition {
+  shelfLifeSeconds: number;
+}
+
+export interface ToolDurabilityDefinition {
+  maxDurability: number;
+}
+
+/** Simulation-time shelf lives. One full authored day is twenty real minutes. */
+export const FOOD_SPOILAGE: Record<
+  PerishableItemId,
+  FoodSpoilageDefinition
+> = {
+  grubs: { shelfLifeSeconds: 180 },
+  "palm-fruit": { shelfLifeSeconds: 360 },
+  "brazil-nuts": { shelfLifeSeconds: 900 },
+};
+
+export const TOOL_DURABILITY: Record<
+  DurableToolId,
+  ToolDurabilityDefinition
+> = {
+  axe: { maxDurability: 36 },
+  spear: { maxDurability: 24 },
+};
 
 /**
  * Renewable world resources regrow one unit at deterministic simulation-time

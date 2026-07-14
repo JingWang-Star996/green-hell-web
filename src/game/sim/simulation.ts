@@ -6,7 +6,24 @@ import {
   TASK_SEQUENCE,
   WORLD_ENTITY_TEMPLATES,
 } from "./content";
+import { advanceEcology, createEcologyState } from "../ecology";
+import {
+  activeChunkCoordinates,
+  chunkKey,
+  generateChunkDescriptor,
+  generateChunkResourcePlan,
+  worldToChunkCoordinate,
+} from "../world/generation";
 import { drawRandom } from "./rng";
+import {
+  addLifecycleInventory,
+  consumeLifecycleInventory,
+  damageDurableTool,
+  ensureItemLifecycleState,
+  expireSpoiledFood,
+  isDurableTool,
+  LIFECYCLE_TICKS_PER_SECOND,
+} from "./lifecycle";
 import {
   canCraft,
   distanceBetween,
@@ -15,10 +32,11 @@ import {
   hasInspectedLandmark,
   isAtCamp,
 } from "./selectors";
-import { cloneGameState } from "./state";
+import { cloneGameState, DYNAMIC_WORLD_LIMIT } from "./state";
 import { ITEM_IDS } from "./types";
 import type {
   EventDetailValue,
+  DurableToolId,
   GameCommand,
   GameEvent,
   GameEventCause,
@@ -47,6 +65,12 @@ const INITIAL_RESOURCE_CAPACITY = new Map(
     (entity) => entity.kind === "resource" && entity.itemId,
   ).map((entity) => [entity.id, Math.max(1, Math.floor(entity.quantity))]),
 );
+const AXE_HARVEST_ITEMS = new Set<ItemId>([
+  "stick",
+  "vine",
+  "broad-leaf",
+  "dry-leaf",
+]);
 
 interface EventInput {
   type: GameEventType;
@@ -94,16 +118,73 @@ function rejectCommand(
 }
 
 function addInventory(state: GameState, itemId: ItemId, amount: number): number {
-  const accepted = Math.max(
-    0,
-    Math.min(amount, ITEMS[itemId].stackLimit - state.inventory[itemId]),
-  );
-  state.inventory[itemId] += accepted;
-  return accepted;
+  return addLifecycleInventory(state, itemId, amount);
+}
+
+function refreshItemLifecycle(state: GameState): void {
+  ensureItemLifecycleState(state);
+  for (const spoiled of expireSpoiledFood(state)) {
+    appendEvent(state, {
+      type: "food-spoiled",
+      message: `${ITEMS[spoiled.itemId].label} ×${spoiled.quantity} 已腐坏，只能丢弃。`,
+      cause: { source: "system", code: `spoilage:${spoiled.itemId}` },
+      details: { itemId: spoiled.itemId, amount: spoiled.quantity },
+    });
+  }
+}
+
+function damageToolAndReport(
+  state: GameState,
+  itemId: DurableToolId,
+  cost: number,
+  causeCode: string,
+): void {
+  const wear = damageDurableTool(state, itemId, cost);
+  if (!wear) return;
+  appendEvent(state, {
+    type: wear.broken ? "tool-broken" : "tool-damaged",
+    message: wear.broken
+      ? `${ITEMS[itemId].label}在使用中损坏，已无法继续使用。`
+      : `${ITEMS[itemId].label}耐久降至 ${wear.durability}/${wear.maxDurability}。`,
+    cause: { source: "system", code: causeCode },
+    details: {
+      itemId,
+      cost: wear.cost,
+      durability: wear.durability,
+      maxDurability: wear.maxDurability,
+      broken: wear.broken,
+    },
+  });
 }
 
 function isPositionValid(position: Vec3): boolean {
   return [position.x, position.y, position.z].every(Number.isFinite);
+}
+
+function materializeGeneratedResources(
+  state: GameState,
+  coordinate: ReturnType<typeof worldToChunkCoordinate>,
+): void {
+  // The authored first-night area owns its hand-placed economy and landmarks.
+  if (Math.abs(coordinate.x) <= 1 && Math.abs(coordinate.z) <= 1) return;
+  const key = chunkKey(coordinate);
+  state.world.generatedResourceChunks ??= [];
+  if (state.world.generatedResourceChunks.includes(key)) return;
+  for (const spawn of generateChunkResourcePlan(String(state.seed), coordinate)) {
+    if (state.world.entities[spawn.id]) continue;
+    state.world.entities[spawn.id] = {
+      id: spawn.id,
+      kind: "resource",
+      label: ITEMS[spawn.kind].label,
+      position: { x: spawn.x, y: 0, z: spawn.z },
+      interactRadius: 2.6,
+      itemId: spawn.kind,
+      quantity: spawn.quantity,
+      depleted: false,
+      tags: ["generated", `chunk:${key}`],
+    };
+  }
+  state.world.generatedResourceChunks.push(key);
 }
 
 function setPlayerPosition(state: GameState, position: Vec3): void {
@@ -112,6 +193,21 @@ function setPlayerPosition(state: GameState, position: Vec3): void {
     y: clamp(position.y, -20, 50),
     z: clamp(position.z, state.world.bounds.minZ, state.world.bounds.maxZ),
   };
+  const exploredCoordinate = worldToChunkCoordinate(
+    state.player.position.x,
+    state.player.position.z,
+  );
+  const exploredKey = chunkKey(exploredCoordinate);
+  state.world.exploredChunks ??= [];
+  if (state.world.exploredChunks.at(-1) !== exploredKey) {
+    const existingIndex = state.world.exploredChunks.indexOf(exploredKey);
+    if (existingIndex >= 0) state.world.exploredChunks.splice(existingIndex, 1);
+    state.world.exploredChunks.push(exploredKey);
+    if (state.world.exploredChunks.length > 4096) {
+      state.world.exploredChunks.splice(0, state.world.exploredChunks.length - 4096);
+    }
+  }
+  materializeGeneratedResources(state, exploredCoordinate);
 }
 
 function applyNutritionDelta(state: GameState, delta: NutritionDelta): void {
@@ -177,8 +273,7 @@ function advanceWorkTime(state: GameState, seconds: number): void {
 }
 
 function harvestLimit(state: GameState, itemId: ItemId): number {
-  const axeHarvest = new Set<ItemId>(["stick", "vine", "broad-leaf", "dry-leaf"]);
-  return axeHarvest.has(itemId) && state.inventory.axe > 0 ? 3 : 1;
+  return AXE_HARVEST_ITEMS.has(itemId) && state.inventory.axe > 0 ? 3 : 1;
 }
 
 function harvestWorkSeconds(state: GameState, itemId: ItemId, amount: number): number {
@@ -311,6 +406,7 @@ function completeAvailableTasks(state: GameState, causeCode: string): void {
   if (
     state.objectives.currentTaskId === null &&
     state.objectives.flags.transmitted &&
+    !state.objectives.flags.sandboxContinued &&
     state.status === "playing"
   ) {
     state.status = "won";
@@ -395,6 +491,9 @@ function handlePickUp(
   }
 
   const perActionLimit = harvestLimit(state, entity.itemId);
+  const usesAxe =
+    state.inventory.axe > 0 &&
+    (AXE_HARVEST_ITEMS.has(entity.itemId) || entity.itemId === "battery");
   const availableAmount = Math.min(requestedAmount, entity.quantity, perActionLimit);
   const acceptedAmount = Math.max(
     0,
@@ -417,6 +516,15 @@ function handlePickUp(
   entity.depleted = entity.quantity <= 0;
   if (entity.depleted) entity.quantity = 0;
   scheduleResourceRegeneration(state, entity);
+
+  if (usesAxe) {
+    damageToolAndReport(
+      state,
+      "axe",
+      entity.itemId === "battery" ? 4 : 1,
+      `tool-use:harvest:${entity.itemId}`,
+    );
+  }
 
   appendEvent(state, {
     type: "resource-picked",
@@ -512,7 +620,7 @@ function handleCraft(
     ItemId,
     number,
   ][]) {
-    state.inventory[itemId] -= amount;
+    consumeLifecycleInventory(state, itemId, amount);
   }
   advanceWorkTime(state, recipe.workSeconds);
   if (state.status !== "playing") return;
@@ -520,9 +628,20 @@ function handleCraft(
     ItemId,
     number,
   ][]) {
-    state.inventory[itemId] += amount;
+    addInventory(state, itemId, amount);
   }
   applyRecipeEffect(state, recipe.effect);
+
+  for (const toolId of recipe.tools ?? []) {
+    if (!isDurableTool(toolId)) continue;
+    const cost = recipe.id === "shelter" ? 4 : recipe.id === "bed" ? 3 : 1;
+    damageToolAndReport(
+      state,
+      toolId,
+      cost,
+      `tool-use:craft:${recipe.id}`,
+    );
+  }
 
   appendEvent(state, {
     type: "craft-succeeded",
@@ -601,9 +720,9 @@ function handleEat(
     });
     return;
   }
+  consumeLifecycleInventory(state, command.itemId, 1);
   advanceWorkTime(state, 5);
   if (state.status !== "playing") return;
-  state.inventory[command.itemId] -= 1;
   applyNutritionDelta(state, definition.edible);
   state.player.vitals.energy += definition.edible.energy ?? 0;
   state.player.vitals.sanity += definition.edible.sanity ?? 0;
@@ -848,6 +967,12 @@ function handleHazardEncounter(
   if (state.inventory.spear > 0) {
     state.player.vitals.stamina = clamp(state.player.vitals.stamina - 5);
     state.player.vitals.sanity = clamp(state.player.vitals.sanity + 2);
+    damageToolAndReport(
+      state,
+      "spear",
+      6,
+      `tool-use:hazard:${entity.id}`,
+    );
     appendEvent(state, {
       type: "threat-avoided",
       message: "嘶声从脚边炸开。石矛逼退了眼镜蛇。",
@@ -898,6 +1023,7 @@ function handleRest(
   const totalMinutes = 14 * 60 + (state.clock.elapsedSeconds / DAY_LENGTH_SECONDS) * 1440;
   state.clock.day = Math.floor(totalMinutes / 1440) + 1;
   state.clock.minuteOfDay = totalMinutes % 1440;
+  refreshItemLifecycle(state);
   normalizeState(state);
   appendEvent(state, {
     type: "rest-completed",
@@ -908,6 +1034,20 @@ function handleRest(
 }
 
 function applyCommandMutable(state: GameState, command: GameCommand): void {
+  refreshItemLifecycle(state);
+  if (command.type === "continue-expedition") {
+    if (state.status !== "won") return;
+    state.status = "playing";
+    state.lossReason = null;
+    state.objectives.flags.sandboxContinued = true;
+    appendEvent(state, {
+      type: "sandbox-continued",
+      message: "应答已经收到，但你选择留下。雨林不再是一次性任务，而是一片持续变化的远征区。",
+      cause: { source: "command", code: "continue-expedition" },
+      details: { day: state.clock.day },
+    });
+    return;
+  }
   if (state.status !== "playing") return;
 
   switch (command.type) {
@@ -1043,6 +1183,24 @@ function updateWeather(state: GameState, dt: number): void {
   state.weather.storm = state.weather.rainIntensity >= 0.72;
 }
 
+function refreshEcology(state: GameState): void {
+  const activeChunks = activeChunkCoordinates(
+    state.player.position.x,
+    state.player.position.z,
+    1,
+  ).map((coordinate) => generateChunkDescriptor(String(state.seed), coordinate));
+  const current = state.ecology ?? createEcologyState(state.seed, {
+    tick: state.clock.tick,
+    rainIntensity: state.weather.rainIntensity,
+    activeChunks,
+  });
+  state.ecology = advanceEcology(current, {
+    tick: state.clock.tick,
+    rainIntensity: state.weather.rainIntensity,
+    activeChunks,
+  }).state;
+}
+
 function extinguishFire(state: GameState, code: string, message: string): void {
   if (!state.camp.fire.lit) return;
   state.camp.fire.lit = false;
@@ -1162,12 +1320,19 @@ function normalizeState(state: GameState): void {
   );
   state.camp.fire.fuelSeconds = Math.max(0, state.camp.fire.fuelSeconds);
   state.camp.fire.rainExposure = Math.max(0, state.camp.fire.rainExposure);
+  state.world.bounds = {
+    minX: -DYNAMIC_WORLD_LIMIT,
+    maxX: DYNAMIC_WORLD_LIMIT,
+    minZ: -DYNAMIC_WORLD_LIMIT,
+    maxZ: DYNAMIC_WORLD_LIMIT,
+  };
   for (const itemId of ITEM_IDS) {
     const count = state.inventory[itemId];
     state.inventory[itemId] = Number.isFinite(count)
       ? Math.max(0, Math.min(999, Math.floor(count)))
       : 0;
   }
+  ensureItemLifecycleState(state);
   for (const entity of Object.values(state.world.entities)) {
     entity.quantity = Number.isFinite(entity.quantity)
       ? Math.max(0, Math.min(999, Math.floor(entity.quantity)))
@@ -1209,6 +1374,10 @@ function runFixedTick(
   movement: MovementInput | undefined,
 ): void {
   updateClock(state);
+  if (state.clock.tick % LIFECYCLE_TICKS_PER_SECOND === 0) {
+    refreshItemLifecycle(state);
+    refreshEcology(state);
+  }
   updateMovement(state, movement, FIXED_DT_SECONDS);
   updateWeather(state, FIXED_DT_SECONDS);
   updateFire(state, FIXED_DT_SECONDS);

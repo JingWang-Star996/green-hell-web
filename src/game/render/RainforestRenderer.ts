@@ -1,4 +1,13 @@
 import * as THREE from "three";
+import {
+  WORLD_CHUNK_SIZE,
+  activeChunkCoordinates,
+  chunkKey,
+  generateChunkVisualPlan,
+  worldToChunkCoordinate,
+  type ChunkVisualPlan,
+  type WorldVisualDetail,
+} from "../world/generation";
 import type {
   EngineCallbacks,
   EngineDiagnostics,
@@ -10,7 +19,6 @@ import type {
   TouchInput,
 } from "./types";
 
-const WORLD_HALF = 54;
 const EYE_HEIGHT = 1.68;
 const WALK_SPEED = 3.35;
 const SPRINT_SPEED = 5.7;
@@ -20,6 +28,7 @@ const SURVEY_SHELTER_Z = 31;
 const SURVEY_SHELTER_YAW = -0.9;
 
 const defaultSnapshot: RenderSnapshot = {
+  worldSeed: "canopy-living-forest-v1",
   day: 1,
   minuteOfDay: 13 * 60 + 20,
   rain: 0.12,
@@ -32,6 +41,7 @@ const defaultSnapshot: RenderSnapshot = {
   signalActive: false,
   canSprint: true,
   entities: [],
+  wildlife: [],
 };
 
 type EntityView = {
@@ -40,6 +50,16 @@ type EntityView = {
 };
 
 type CircleCollider = { x: number; z: number; radius: number };
+
+type ChunkView = {
+  group: THREE.Group;
+  colliders: CircleCollider[];
+};
+
+type WildlifeView = {
+  projection: RenderSnapshot["wildlife"][number];
+  object: THREE.Object3D;
+};
 
 export class RainforestRenderer {
   private readonly canvas: HTMLCanvasElement;
@@ -50,10 +70,13 @@ export class RainforestRenderer {
   private previousFrameTime = performance.now();
   private readonly keys = new Set<string>();
   private readonly entityViews = new Map<string, EntityView>();
+  private readonly wildlifeViews = new Map<string, WildlifeView>();
+  private readonly chunkViews = new Map<string, ChunkView>();
   private readonly colliders: CircleCollider[] = [];
   private readonly hazardWarned = new Set<string>();
   private readonly hazardTriggered = new Set<string>();
   private readonly worldGroup = new THREE.Group();
+  private readonly chunkGroup = new THREE.Group();
   private readonly dynamicGroup = new THREE.Group();
   private readonly rainGeometry = new THREE.BufferGeometry();
   private readonly rainMaterial = new THREE.PointsMaterial({
@@ -97,21 +120,29 @@ export class RainforestRenderer {
   private diagnostics: EngineDiagnostics = { fps: 0, frameMs: 0, drawCalls: 0, triangles: 0, x: 0, z: 0 };
   private reducedMotion = false;
   private userReducedMotion = false;
+  private activeChunkCenter = "";
+  private readonly worldVisualDetail: WorldVisualDetail;
+  private readonly activeChunkRadius: number;
+  private readonly maxWildlifeViews: number;
   private readonly cleanup: Array<() => void> = [];
 
   constructor(canvas: HTMLCanvasElement, callbacks: EngineCallbacks) {
     this.canvas = canvas;
     this.callbacks = callbacks;
+    const lowPower = this.isLowPowerDevice();
+    this.worldVisualDetail = lowPower ? "low" : "standard";
+    this.activeChunkRadius = lowPower ? 1 : 2;
+    this.maxWildlifeViews = lowPower ? 10 : 24;
     this.renderer = new THREE.WebGLRenderer({
       canvas,
-      antialias: !this.isLowPowerDevice(),
+      antialias: !lowPower,
       alpha: false,
       powerPreference: "high-performance",
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.95;
-    this.renderer.shadowMap.enabled = !this.isLowPowerDevice();
+    this.renderer.shadowMap.enabled = !lowPower;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.scene.fog = new THREE.FogExp2(0x274435, 0.021);
     this.scene.background = new THREE.Color(0x6b8c72);
@@ -153,8 +184,14 @@ export class RainforestRenderer {
   }
 
   setSnapshot(snapshot: RenderSnapshot): void {
+    const seedChanged = snapshot.worldSeed !== this.snapshot.worldSeed;
     this.snapshot = snapshot;
+    if (seedChanged) {
+      this.clearWorldChunks();
+      this.syncWorldChunks();
+    }
     this.syncEntities(snapshot.entities);
+    this.syncWildlife(snapshot.wildlife);
     this.syncStructures();
     if (!this.running) this.renderer.render(this.scene, this.camera);
   }
@@ -189,15 +226,12 @@ export class RainforestRenderer {
   }
 
   setPlayerPosition(x: number, z: number, yaw = this.yaw): void {
-    this.player.set(
-      THREE.MathUtils.clamp(x, -WORLD_HALF + 1, WORLD_HALF - 1),
-      0,
-      THREE.MathUtils.clamp(z, -WORLD_HALF + 1, WORLD_HALF - 1),
-    );
+    this.player.set(x, 0, z);
     this.lastPlayer.copy(this.player);
     this.yaw = yaw;
     this.camera.position.set(this.player.x, terrainHeight(this.player.x, this.player.z) + EYE_HEIGHT, this.player.z);
     this.camera.rotation.set(this.pitch, this.yaw, 0);
+    this.syncWorldChunks();
   }
 
   requestPointerLock(): void {
@@ -393,8 +427,6 @@ export class RainforestRenderer {
     }
 
     const candidate = this.player.clone().add(movement);
-    candidate.x = THREE.MathUtils.clamp(candidate.x, -WORLD_HALF + 1, WORLD_HALF - 1);
-    candidate.z = THREE.MathUtils.clamp(candidate.z, -WORLD_HALF + 1, WORLD_HALF - 1);
     if (!this.isColliding(candidate.x, candidate.z)) this.player.copy(candidate);
     else {
       const slideX = new THREE.Vector3(candidate.x, 0, this.player.z);
@@ -408,6 +440,7 @@ export class RainforestRenderer {
     this.camera.position.set(this.player.x, terrainHeight(this.player.x, this.player.z) + EYE_HEIGHT + bob, this.player.z);
     this.camera.rotation.set(this.pitch, this.yaw, 0);
     this.lastPlayer.copy(this.player);
+    this.syncWorldChunks();
 
     const frame: PlayerFrame = {
       x: this.player.x,
@@ -567,6 +600,21 @@ export class RainforestRenderer {
         this.callbacks.onHazard(view.definition.id);
       }
     }
+    for (const view of this.wildlifeViews.values()) {
+      if (view.projection.role !== "predator" || !view.projection.visible) continue;
+      const warningId = `wildlife:${view.projection.individualId}`;
+      const distance = Math.hypot(
+        this.player.x - view.projection.position.x,
+        this.player.z - view.projection.position.z,
+      );
+      if (
+        distance < view.projection.encounter.awarenessRadius &&
+        !this.hazardWarned.has(warningId)
+      ) {
+        this.hazardWarned.add(warningId);
+        this.callbacks.onHazardWarning(warningId);
+      }
+    }
   }
 
   private updateDiagnostics(delta: number): void {
@@ -612,6 +660,42 @@ export class RainforestRenderer {
     }
   }
 
+  private syncWildlife(wildlife: RenderSnapshot["wildlife"]): void {
+    const visible = wildlife
+      .filter((projection) => projection.visible)
+      .sort((left, right) =>
+        Math.hypot(left.position.x - this.player.x, left.position.z - this.player.z) -
+        Math.hypot(right.position.x - this.player.x, right.position.z - this.player.z),
+      )
+      .slice(0, this.maxWildlifeViews);
+    const incoming = new Set(visible.map((projection) => projection.individualId));
+    for (const [id, view] of this.wildlifeViews) {
+      if (incoming.has(id)) continue;
+      this.dynamicGroup.remove(view.object);
+      disposeObject(view.object);
+      this.wildlifeViews.delete(id);
+    }
+    for (const projection of visible) {
+      let view = this.wildlifeViews.get(projection.individualId);
+      if (!view) {
+        const object = createWildlifeObject(projection.speciesId);
+        object.userData.wildlifeId = projection.individualId;
+        this.dynamicGroup.add(object);
+        view = { projection, object };
+        this.wildlifeViews.set(projection.individualId, view);
+      }
+      view.projection = projection;
+      view.object.position.set(
+        projection.position.x,
+        terrainHeight(projection.position.x, projection.position.z),
+        projection.position.z,
+      );
+      view.object.rotation.y = -projection.headingRadians;
+      view.object.scale.setScalar(projection.scale);
+      view.object.visible = projection.visible;
+    }
+  }
+
   private syncStructures(): void {
     this.fireGroup.visible = this.snapshot.fireBuilt;
     const shelter = this.worldGroup.getObjectByName("player-shelter");
@@ -623,109 +707,274 @@ export class RainforestRenderer {
   }
 
   private createWorld(): void {
-    const groundGeometry = new THREE.PlaneGeometry(WORLD_HALF * 2, WORLD_HALF * 2, 72, 72);
-    groundGeometry.rotateX(-Math.PI / 2);
-    const positions = groundGeometry.attributes.position as THREE.BufferAttribute;
-    const colors: number[] = [];
-    const low = new THREE.Color(0x243d26);
-    const high = new THREE.Color(0x436038);
-    const mud = new THREE.Color(0x514a31);
-    for (let i = 0; i < positions.count; i += 1) {
-      const x = positions.getX(i);
-      const z = positions.getZ(i);
-      const height = terrainHeight(x, z);
-      positions.setY(i, height);
-      const river = riverDistance(x, z);
-      const color = river < 2.8 ? mud : low.clone().lerp(high, THREE.MathUtils.clamp((height + 1.5) / 7, 0, 1));
-      const variation = (hash2(x * 3, z * 3) - 0.5) * 0.09;
-      color.offsetHSL(0, 0, variation);
-      colors.push(color.r, color.g, color.b);
-    }
-    groundGeometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
-    groundGeometry.computeVertexNormals();
-    const ground = new THREE.Mesh(groundGeometry, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 }));
-    ground.receiveShadow = true;
-    this.worldGroup.add(ground);
-
-    this.createRiver();
-    this.createForest();
+    this.worldGroup.add(this.chunkGroup);
+    this.syncWorldChunks();
     this.createLandmarks();
   }
 
-  private createRiver(): void {
-    const waterMaterial = new THREE.MeshPhysicalMaterial({
-      color: 0x2f756f,
-      roughness: 0.22,
-      metalness: 0.05,
-      transparent: true,
-      opacity: 0.78,
-      depthWrite: true,
-    });
-    for (let x = -52; x <= 52; x += 2) {
-      const z = riverCenter(x);
-      const segment = new THREE.Mesh(new THREE.PlaneGeometry(2.3, 4.4), waterMaterial);
-      segment.rotation.x = -Math.PI / 2;
-      segment.position.set(x, terrainHeight(x, z) + 0.18, z);
-      segment.rotation.z = -Math.atan(Math.cos(x * 0.09) * 0.27);
-      segment.receiveShadow = true;
-      this.worldGroup.add(segment);
+  private syncWorldChunks(): void {
+    const center = worldToChunkCoordinate(this.player.x, this.player.z);
+    const centerKey = chunkKey(center);
+    if (centerKey === this.activeChunkCenter) return;
+
+    const requiredCoordinates = activeChunkCoordinates(
+      this.player.x,
+      this.player.z,
+      this.activeChunkRadius,
+    );
+    const requiredKeys = new Set(requiredCoordinates.map((coordinate) => chunkKey(coordinate)));
+    for (const [key, view] of this.chunkViews) {
+      if (requiredKeys.has(key)) continue;
+      this.chunkGroup.remove(view.group);
+      disposeObject(view.group);
+      this.chunkViews.delete(key);
     }
+
+    for (const coordinate of requiredCoordinates) {
+      const key = chunkKey(coordinate);
+      if (this.chunkViews.has(key)) continue;
+      const plan = generateChunkVisualPlan(this.snapshot.worldSeed, coordinate, this.worldVisualDetail);
+      const view = this.createChunkView(plan);
+      this.chunkViews.set(key, view);
+      this.chunkGroup.add(view.group);
+    }
+    this.activeChunkCenter = centerKey;
   }
 
-  private createForest(): void {
-    const count = this.isLowPowerDevice() ? 145 : 240;
-    const trunkGeometry = new THREE.CylinderGeometry(0.18, 0.31, 4.2, 6);
-    const crownGeometry = new THREE.ConeGeometry(1.65, 4.6, 7);
-    const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x4a3423, roughness: 1 });
-    const crownMaterial = new THREE.MeshStandardMaterial({ color: 0x1d4b2c, roughness: 0.98 });
-    const trunks = new THREE.InstancedMesh(trunkGeometry, trunkMaterial, count);
-    const crowns = new THREE.InstancedMesh(crownGeometry, crownMaterial, count);
-    const dummy = new THREE.Object3D();
-    let placed = 0;
-    let attempt = 0;
-    while (placed < count && attempt < count * 12) {
-      attempt += 1;
-      const x = seeded(attempt * 17.13) * 104 - 52;
-      const z = seeded(attempt * 41.77 + 9) * 104 - 52;
-      if (riverDistance(x, z) < 3.7 || isLandmarkClearing(x, z)) continue;
-      const scale = 0.78 + seeded(attempt * 5.3) * 0.7;
-      const y = terrainHeight(x, z);
-      dummy.position.set(x, y + 2.1 * scale, z);
-      dummy.scale.set(scale, scale, scale);
-      dummy.rotation.y = seeded(attempt * 3.2) * Math.PI;
-      dummy.updateMatrix();
-      trunks.setMatrixAt(placed, dummy.matrix);
-      dummy.position.y = y + (5.1 + seeded(attempt * 7) * 0.7) * scale;
-      dummy.rotation.y += 0.4;
-      dummy.scale.set(scale * (0.85 + seeded(attempt * 13) * 0.35), scale, scale * 0.9);
-      dummy.updateMatrix();
-      crowns.setMatrixAt(placed, dummy.matrix);
-      this.colliders.push({ x, z, radius: 0.34 * scale + 0.25 });
-      placed += 1;
+  private clearWorldChunks(): void {
+    for (const view of this.chunkViews.values()) {
+      this.chunkGroup.remove(view.group);
+      disposeObject(view.group);
     }
-    trunks.count = placed;
-    crowns.count = placed;
+    this.chunkViews.clear();
+    this.activeChunkCenter = "";
+  }
+
+  private createChunkView(plan: ChunkVisualPlan): ChunkView {
+    const group = new THREE.Group();
+    const colliders: CircleCollider[] = [];
+    group.name = `world-chunk-${plan.descriptor.key}`;
+    group.userData.biome = plan.descriptor.biome;
+    this.createChunkGround(plan, group);
+    this.createChunkTrees(plan, group, colliders);
+    this.createChunkUndergrowth(plan, group);
+    this.createChunkRocks(plan, group, colliders);
+    this.createChunkWater(plan, group);
+    return { group, colliders };
+  }
+
+  private createChunkGround(plan: ChunkVisualPlan, group: THREE.Group): void {
+    const coordinate = plan.descriptor.coordinate;
+    const centerX = (coordinate.x + 0.5) * WORLD_CHUNK_SIZE;
+    const centerZ = (coordinate.z + 0.5) * WORLD_CHUNK_SIZE;
+    const segments = this.worldVisualDetail === "low" ? 8 : 12;
+    const geometry = new THREE.PlaneGeometry(
+      WORLD_CHUNK_SIZE,
+      WORLD_CHUNK_SIZE,
+      segments,
+      segments,
+    );
+    geometry.rotateX(-Math.PI / 2);
+    const positions = geometry.attributes.position as THREE.BufferAttribute;
+    const colors: number[] = [];
+    const low = new THREE.Color(plan.profile.groundLow);
+    const high = new THREE.Color(plan.profile.groundHigh);
+    const mud = new THREE.Color(0x4e4933);
+    for (let index = 0; index < positions.count; index += 1) {
+      const worldX = centerX + positions.getX(index);
+      const worldZ = centerZ + positions.getZ(index);
+      const height = terrainHeight(worldX, worldZ);
+      positions.setY(index, height);
+      const color = low.clone().lerp(
+        high,
+        THREE.MathUtils.clamp((height + 1.8) / 5.6, 0, 1),
+      );
+      if (riverDistance(worldX, worldZ) < 3.1) color.lerp(mud, 0.72);
+      color.offsetHSL(0, 0, (hash2(worldX * 3, worldZ * 3) - 0.5) * 0.08);
+      colors.push(color.r, color.g, color.b);
+    }
+    geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+    geometry.computeVertexNormals();
+    const ground = new THREE.Mesh(
+      geometry,
+      new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 }),
+    );
+    ground.position.set(centerX, 0, centerZ);
+    ground.receiveShadow = true;
+    group.add(ground);
+  }
+
+  private createChunkTrees(
+    plan: ChunkVisualPlan,
+    group: THREE.Group,
+    colliders: CircleCollider[],
+  ): void {
+    const trees = plan.trees.filter(
+      (spawn) => riverDistance(spawn.x, spawn.z) >= 3.5 && !isLandmarkClearing(spawn.x, spawn.z),
+    );
+    if (trees.length === 0) return;
+    const style = plan.profile.treeStyle;
+    const trunkHeight = style === "palm" ? 5.8 : style === "wetland" ? 5.1 : 4.5;
+    const trunkGeometry = new THREE.CylinderGeometry(
+      style === "palm" ? 0.13 : 0.18,
+      style === "palm" ? 0.24 : 0.32,
+      trunkHeight,
+      6,
+    );
+    const crownGeometry = style === "palm"
+      ? new THREE.ConeGeometry(2.25, 0.72, 8)
+      : style === "sparse"
+        ? new THREE.ConeGeometry(1.35, 3.4, 6)
+        : new THREE.SphereGeometry(style === "wetland" ? 1.25 : 1.55, 7, 5);
+    const trunks = new THREE.InstancedMesh(
+      trunkGeometry,
+      new THREE.MeshStandardMaterial({ color: style === "wetland" ? 0x40382a : 0x4a3423, roughness: 1 }),
+      trees.length,
+    );
+    const crowns = new THREE.InstancedMesh(
+      crownGeometry,
+      new THREE.MeshStandardMaterial({ color: plan.profile.treeColor, roughness: 0.98 }),
+      trees.length,
+    );
+    const dummy = new THREE.Object3D();
+    trees.forEach((spawn, index) => {
+      const y = terrainHeight(spawn.x, spawn.z);
+      dummy.position.set(spawn.x, y + (trunkHeight * spawn.scale) / 2, spawn.z);
+      dummy.scale.setScalar(spawn.scale);
+      dummy.rotation.set(0, spawn.rotation, style === "wetland" ? 0.04 * Math.sin(spawn.rotation) : 0);
+      dummy.updateMatrix();
+      trunks.setMatrixAt(index, dummy.matrix);
+      dummy.position.y = y + trunkHeight * spawn.scale;
+      dummy.rotation.set(0, spawn.rotation + 0.35, 0);
+      if (style === "palm") dummy.scale.set(spawn.scale, spawn.scale * 0.74, spawn.scale);
+      else if (style === "wetland") dummy.scale.set(spawn.scale * 0.86, spawn.scale * 0.72, spawn.scale * 0.86);
+      else dummy.scale.set(spawn.scale, spawn.scale, spawn.scale * 0.92);
+      dummy.updateMatrix();
+      crowns.setMatrixAt(index, dummy.matrix);
+      colliders.push({ x: spawn.x, z: spawn.z, radius: 0.3 * spawn.scale + 0.22 });
+    });
     trunks.castShadow = this.renderer.shadowMap.enabled;
     trunks.receiveShadow = true;
     crowns.castShadow = this.renderer.shadowMap.enabled;
-    this.worldGroup.add(trunks, crowns);
+    group.add(trunks, crowns);
+  }
 
-    const fernCount = this.isLowPowerDevice() ? 150 : 320;
-    const fernGeometry = new THREE.ConeGeometry(0.48, 0.78, 5);
-    fernGeometry.translate(0, 0.39, 0);
-    const fernMaterial = new THREE.MeshStandardMaterial({ color: 0x356c3a, roughness: 1, side: THREE.DoubleSide });
-    const ferns = new THREE.InstancedMesh(fernGeometry, fernMaterial, fernCount);
-    for (let i = 0; i < fernCount; i += 1) {
-      const x = seeded(i * 19.3 + 4) * 104 - 52;
-      const z = seeded(i * 29.7 + 18) * 104 - 52;
-      const scale = 0.45 + seeded(i * 7.1) * 0.75;
-      dummy.position.set(x, terrainHeight(x, z), z);
-      dummy.scale.set(scale, scale, scale);
-      dummy.rotation.set(0, seeded(i * 11) * Math.PI * 2, 0);
+  private createChunkUndergrowth(plan: ChunkVisualPlan, group: THREE.Group): void {
+    const shrubs = plan.shrubs.filter((spawn) => !isLandmarkClearing(spawn.x, spawn.z));
+    if (shrubs.length === 0) return;
+    const wetland = plan.profile.treeStyle === "wetland";
+    const geometry = wetland
+      ? new THREE.ConeGeometry(0.13, 1.55, 5)
+      : new THREE.ConeGeometry(0.48, 0.8, 5);
+    geometry.translate(0, wetland ? 0.775 : 0.4, 0);
+    const shrubsMesh = new THREE.InstancedMesh(
+      geometry,
+      new THREE.MeshStandardMaterial({
+        color: plan.profile.shrubColor,
+        roughness: 1,
+        side: THREE.DoubleSide,
+      }),
+      shrubs.length,
+    );
+    const dummy = new THREE.Object3D();
+    shrubs.forEach((spawn, index) => {
+      dummy.position.set(spawn.x, terrainHeight(spawn.x, spawn.z), spawn.z);
+      dummy.scale.set(spawn.scale, spawn.scale, spawn.scale);
+      dummy.rotation.set(0, spawn.rotation, wetland ? Math.sin(spawn.rotation) * 0.08 : 0);
       dummy.updateMatrix();
-      ferns.setMatrixAt(i, dummy.matrix);
+      shrubsMesh.setMatrixAt(index, dummy.matrix);
+    });
+    shrubsMesh.receiveShadow = true;
+    group.add(shrubsMesh);
+  }
+
+  private createChunkRocks(
+    plan: ChunkVisualPlan,
+    group: THREE.Group,
+    colliders: CircleCollider[],
+  ): void {
+    const rocks = plan.rocks.filter((spawn) => !isLandmarkClearing(spawn.x, spawn.z));
+    if (rocks.length === 0) return;
+    const rockMesh = new THREE.InstancedMesh(
+      new THREE.DodecahedronGeometry(0.72, 0),
+      new THREE.MeshStandardMaterial({ color: plan.profile.rockColor, roughness: 1 }),
+      rocks.length,
+    );
+    const dummy = new THREE.Object3D();
+    rocks.forEach((spawn, index) => {
+      dummy.position.set(spawn.x, terrainHeight(spawn.x, spawn.z) + 0.32 * spawn.scale, spawn.z);
+      dummy.scale.set(spawn.scale, spawn.scale * 0.55, spawn.scale * 0.82);
+      dummy.rotation.set(spawn.rotation * 0.07, spawn.rotation, spawn.rotation * 0.04);
+      dummy.updateMatrix();
+      rockMesh.setMatrixAt(index, dummy.matrix);
+      if (spawn.scale > 0.9) {
+        colliders.push({ x: spawn.x, z: spawn.z, radius: 0.38 * spawn.scale });
+      }
+    });
+    rockMesh.castShadow = this.renderer.shadowMap.enabled;
+    rockMesh.receiveShadow = true;
+    group.add(rockMesh);
+  }
+
+  private createChunkWater(plan: ChunkVisualPlan, group: THREE.Group): void {
+    if (plan.wetPatches.length > 0) {
+      const puddles = new THREE.InstancedMesh(
+        new THREE.CircleGeometry(1, 18),
+        new THREE.MeshPhysicalMaterial({
+          color: plan.descriptor.biome === "swamp" ? 0x1d3a31 : 0x356b65,
+          roughness: 0.28,
+          transparent: true,
+          opacity: 0.72,
+          depthWrite: false,
+        }),
+        plan.wetPatches.length,
+      );
+      const dummy = new THREE.Object3D();
+      plan.wetPatches.forEach((spawn, index) => {
+        dummy.position.set(spawn.x, terrainHeight(spawn.x, spawn.z) + 0.08, spawn.z);
+        dummy.scale.set(spawn.scale * 1.35, spawn.scale * 0.75, 1);
+        dummy.rotation.set(-Math.PI / 2, 0, spawn.rotation);
+        dummy.updateMatrix();
+        puddles.setMatrixAt(index, dummy.matrix);
+      });
+      group.add(puddles);
     }
-    this.worldGroup.add(ferns);
+
+    const minX = plan.descriptor.coordinate.x * WORLD_CHUNK_SIZE;
+    const maxX = minX + WORLD_CHUNK_SIZE;
+    const minZ = plan.descriptor.coordinate.z * WORLD_CHUNK_SIZE;
+    const maxZ = minZ + WORLD_CHUNK_SIZE;
+    const riverSegments: Array<{ x: number; z: number; rotation: number }> = [];
+    for (let x = minX + 1.5; x < maxX; x += 3) {
+      const z = riverCenter(x);
+      if (z < minZ - 2.4 || z > maxZ + 2.4) continue;
+      riverSegments.push({ x, z, rotation: -Math.atan(Math.cos(x * 0.09) * 0.27) });
+    }
+    if (riverSegments.length === 0) return;
+    const geometry = new THREE.PlaneGeometry(3.25, 4.5);
+    geometry.rotateX(-Math.PI / 2);
+    const river = new THREE.InstancedMesh(
+      geometry,
+      new THREE.MeshPhysicalMaterial({
+        color: 0x2f756f,
+        roughness: 0.22,
+        metalness: 0.05,
+        transparent: true,
+        opacity: 0.78,
+        depthWrite: true,
+      }),
+      riverSegments.length,
+    );
+    const dummy = new THREE.Object3D();
+    riverSegments.forEach((segment, index) => {
+      dummy.position.set(segment.x, terrainHeight(segment.x, segment.z) + 0.18, segment.z);
+      dummy.rotation.set(0, segment.rotation, 0);
+      dummy.scale.set(1, 1, 1);
+      dummy.updateMatrix();
+      river.setMatrixAt(index, dummy.matrix);
+    });
+    river.receiveShadow = true;
+    group.add(river);
   }
 
   private createLandmarks(): void {
@@ -908,6 +1157,11 @@ export class RainforestRenderer {
     for (const collider of this.colliders) {
       if (Math.hypot(x - collider.x, z - collider.z) < collider.radius + 0.28) return true;
     }
+    for (const view of this.chunkViews.values()) {
+      for (const collider of view.colliders) {
+        if (Math.hypot(x - collider.x, z - collider.z) < collider.radius + 0.28) return true;
+      }
+    }
     return false;
   }
 
@@ -963,6 +1217,58 @@ function isLandmarkClearing(x: number, z: number): boolean {
     Math.hypot(x + 35, z - 31) < 6 ||
     Math.hypot(x - 39, z + 31) < 5
   );
+}
+
+function createWildlifeObject(
+  speciesId: RenderSnapshot["wildlife"][number]["speciesId"],
+): THREE.Object3D {
+  const group = new THREE.Group();
+  const material = (color: number) =>
+    new THREE.MeshStandardMaterial({ color, roughness: 0.96 });
+  const addMesh = (
+    geometry: THREE.BufferGeometry,
+    color: number,
+    position: readonly [number, number, number],
+    scale: readonly [number, number, number] = [1, 1, 1],
+  ) => {
+    const object = new THREE.Mesh(geometry, material(color));
+    object.position.set(...position);
+    object.scale.set(...scale);
+    object.castShadow = true;
+    object.receiveShadow = true;
+    group.add(object);
+    return object;
+  };
+
+  if (speciesId === "reedtail-scuttler") {
+    addMesh(new THREE.SphereGeometry(0.36, 7, 5), 0x826747, [0, 0.34, 0], [1.25, 0.72, 0.72]);
+    addMesh(new THREE.SphereGeometry(0.22, 7, 5), 0xa1845d, [0, 0.38, -0.42], [0.9, 0.85, 1]);
+    const tail = addMesh(new THREE.ConeGeometry(0.08, 0.82, 5), 0x9c7b52, [0, 0.34, 0.57]);
+    tail.rotation.x = Math.PI / 2;
+  } else if (speciesId === "mossback-grazer") {
+    addMesh(new THREE.SphereGeometry(0.72, 8, 6), 0x42543a, [0, 0.82, 0], [1.35, 0.82, 0.82]);
+    addMesh(new THREE.SphereGeometry(0.42, 7, 5), 0x526348, [0, 0.82, -0.82], [0.9, 0.78, 1.2]);
+    for (const x of [-0.5, 0.5]) {
+      for (const z of [-0.42, 0.42]) {
+        addMesh(new THREE.CylinderGeometry(0.08, 0.1, 0.78, 5), 0x383b2c, [x, 0.38, z]);
+      }
+    }
+    const moss = addMesh(new THREE.ConeGeometry(0.5, 0.28, 7), 0x65824b, [0.1, 1.38, 0.08], [1.3, 1, 0.9]);
+    moss.rotation.z = Math.PI;
+  } else {
+    addMesh(new THREE.SphereGeometry(0.56, 8, 6), 0x6b4a2f, [0, 0.62, 0], [1.5, 0.62, 0.72]);
+    addMesh(new THREE.SphereGeometry(0.34, 7, 5), 0x8b6037, [0, 0.69, -0.67], [0.9, 0.72, 1.15]);
+    const tail = addMesh(new THREE.ConeGeometry(0.1, 1.05, 6), 0x5b3928, [0, 0.58, 0.82]);
+    tail.rotation.x = Math.PI / 2;
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.36, 0.045, 5, 12),
+      new THREE.MeshBasicMaterial({ color: 0xd58a35 }),
+    );
+    ring.rotation.x = Math.PI / 2;
+    ring.position.set(0, 0.72, -0.02);
+    group.add(ring);
+  }
+  return group;
 }
 
 function createEntityObject(kind: RenderEntityKind): THREE.Object3D {

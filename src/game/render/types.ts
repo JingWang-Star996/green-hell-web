@@ -1,3 +1,5 @@
+import type { EcologyRenderProjection } from "../ecology";
+
 export type RenderEntityKind =
   | "stick"
   | "stone"
@@ -28,6 +30,7 @@ export type RenderEntity = {
 };
 
 export type RenderSnapshot = {
+  worldSeed: string;
   day: number;
   minuteOfDay: number;
   rain: number;
@@ -40,6 +43,7 @@ export type RenderSnapshot = {
   signalActive: boolean;
   canSprint: boolean;
   entities: RenderEntity[];
+  wildlife: EcologyRenderProjection[];
 };
 
 export type InteractionTarget = {

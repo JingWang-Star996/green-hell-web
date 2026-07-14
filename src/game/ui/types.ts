@@ -26,6 +26,8 @@ export type InventoryItemView = {
   category: "material" | "food" | "water" | "medicine" | "tool" | "mission";
   action?: "eat" | "drink" | "use";
   actionLabel?: string;
+  statusLabel?: string;
+  statusTone?: "stable" | "warning" | "danger";
 };
 
 export type RecipeView = {
@@ -61,6 +63,7 @@ export type WatchView = {
   time: string;
   coordinates: string;
   weather: string;
+  biome: string;
   rain: number;
   meters: MeterView[];
 };
@@ -72,4 +75,13 @@ export type MapLandmark = {
   z: number;
   discovered: boolean;
   kind: "camp" | "water" | "station" | "cave" | "food";
+};
+
+export type MapChunkView = {
+  key: string;
+  x: number;
+  z: number;
+  biome: string;
+  color: string;
+  current: boolean;
 };

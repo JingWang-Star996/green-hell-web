@@ -1,3 +1,5 @@
+import type { EcologyState } from "../ecology";
+
 export const ITEM_IDS = [
   "stone",
   "stick",
@@ -21,6 +23,18 @@ export const ITEM_IDS = [
 ] as const;
 
 export type ItemId = (typeof ITEM_IDS)[number];
+
+export const PERISHABLE_ITEM_IDS = [
+  "palm-fruit",
+  "brazil-nuts",
+  "grubs",
+] as const;
+
+export type PerishableItemId = (typeof PERISHABLE_ITEM_IDS)[number];
+
+export const DURABLE_TOOL_IDS = ["axe", "spear"] as const;
+
+export type DurableToolId = (typeof DURABLE_TOOL_IDS)[number];
 
 export const RECIPE_IDS = [
   "stone-blade",
@@ -138,6 +152,26 @@ export interface ResourceRegenerationDefinition {
   minimumPlayerDistance: number;
 }
 
+export interface PerishableBatchState {
+  quantity: number;
+  /** Fixed simulation tick at which this batch is removed as spoiled. */
+  expiresAtTick: number;
+}
+
+export interface DurableToolState {
+  durability: number;
+  maxDurability: number;
+}
+
+/**
+ * Per-unit inventory state added after the original save format shipped.
+ * Optionality is deliberate: version-1 saves are migrated lazily and safely.
+ */
+export interface ItemLifecycleState {
+  perishables: Partial<Record<PerishableItemId, PerishableBatchState[]>>;
+  tools: Partial<Record<DurableToolId, DurableToolState[]>>;
+}
+
 export interface WorldEntity {
   id: string;
   kind: WorldEntityKind;
@@ -162,6 +196,10 @@ export interface WorldBounds {
 export interface WorldState {
   bounds: WorldBounds;
   entities: Record<string, WorldEntity>;
+  /** Ordered discovery list; omitted by legacy saves. */
+  exploredChunks?: string[];
+  /** Chunks whose deterministic interactive baseline has been materialized. */
+  generatedResourceChunks?: string[];
 }
 
 export interface ObjectiveFlags {
@@ -170,6 +208,8 @@ export interface ObjectiveFlags {
   campEstablished: boolean;
   batteryRecovered: boolean;
   transmitted: boolean;
+  /** Set after the authored rescue ending when the player elects to stay. */
+  sandboxContinued?: boolean;
 }
 
 export interface ObjectiveState {
@@ -200,8 +240,12 @@ export type GameEventType =
   | "fire-lit"
   | "fire-extinguished"
   | "fuel-added"
+  | "food-spoiled"
+  | "tool-damaged"
+  | "tool-broken"
   | "task-completed"
   | "game-won"
+  | "sandbox-continued"
   | "game-lost";
 
 export interface GameEventCause {
@@ -244,9 +288,12 @@ export interface GameState {
   rng: RngChannels;
   player: PlayerState;
   inventory: Inventory;
+  itemLifecycle?: ItemLifecycleState;
   weather: WeatherState;
   camp: CampState;
   world: WorldState;
+  /** Optional for legacy version-1 saves; migration materializes it. */
+  ecology?: EcologyState;
   objectives: ObjectiveState;
   eventLog: GameEvent[];
   nextEventId: number;
@@ -269,7 +316,8 @@ export type GameCommand =
   | { type: "add-fuel" }
   | { type: "encounter-hazard"; entityId: string }
   | { type: "rest" }
-  | { type: "transmit" };
+  | { type: "transmit" }
+  | { type: "continue-expedition" };
 
 export interface MovementInput {
   x: number;

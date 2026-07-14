@@ -3,6 +3,7 @@ import type {
   BodyView,
   EventView,
   InventoryItemView,
+  MapChunkView,
   MapLandmark,
   ObjectiveView,
   PanelId,
@@ -19,6 +20,7 @@ type PanelsProps = {
   objectives: ObjectiveView[];
   events: EventView[];
   landmarks: MapLandmark[];
+  mapChunks: MapChunkView[];
   score: number;
   audioEnabled: boolean;
   reducedMotion: boolean;
@@ -92,7 +94,7 @@ export function Panels(props: PanelsProps) {
           {props.active === "crafting" && <CraftingPanel recipes={props.recipes} onCraft={props.onCraft} />}
           {props.active === "body" && <BodyPanel body={props.body} onTreatWound={props.onTreatWound} onTreatParasites={props.onTreatParasites} />}
           {props.active === "notebook" && <NotebookPanel objectives={props.objectives} events={props.events} score={props.score} />}
-          {props.active === "map" && <MapPanel landmarks={props.landmarks} coordinates={props.watch.coordinates} />}
+          {props.active === "map" && <MapPanel landmarks={props.landmarks} chunks={props.mapChunks} coordinates={props.watch.coordinates} biome={props.watch.biome} />}
           {props.active === "pause" && (
             <PausePanel
               audioEnabled={props.audioEnabled}
@@ -114,7 +116,7 @@ function WatchPanel({ watch }: { watch: WatchView }) {
     <div className="watch-layout">
       <div className="watch-face">
         <div className="watch-time"><small>DAY {watch.day}</small><strong>{watch.time}</strong><span>{watch.weather}</span></div>
-        <div className="watch-coordinates"><small>GPS / COMPASS</small><b>{watch.coordinates}</b></div>
+        <div className="watch-coordinates"><small>GPS / COMPASS · {watch.biome}</small><b>{watch.coordinates}</b></div>
         <div className="watch-rain"><i style={{ width: `${watch.rain * 100}%` }} /><span>降雨强度 {Math.round(watch.rain * 100)}%</span></div>
       </div>
       <div className="macro-grid">
@@ -139,7 +141,16 @@ function InventoryPanel({ items, onAction }: { items: InventoryItemView[]; onAct
         {carried.map((item) => (
           <article key={item.id} className={`inventory-item item-${item.category}`}>
             <span className="item-symbol">{item.label.slice(0, 1)}</span>
-            <div><small>{item.category.toUpperCase()}</small><strong>{item.label}</strong><p>{item.description}</p></div>
+            <div>
+              <small>{item.category.toUpperCase()}</small>
+              <strong>{item.label}</strong>
+              <p>{item.description}</p>
+              {item.statusLabel && (
+                <small className={`item-lifecycle status-${item.statusTone ?? "stable"}`}>
+                  {item.statusLabel}
+                </small>
+              )}
+            </div>
             <b className="item-count">×{item.count}</b>
             {item.action && <button onClick={() => onAction(item)}>{item.actionLabel ?? "使用"}</button>}
           </article>
@@ -211,20 +222,40 @@ function NotebookPanel({ objectives, events, score }: { objectives: ObjectiveVie
   );
 }
 
-function MapPanel({ landmarks, coordinates }: { landmarks: MapLandmark[]; coordinates: string }) {
+function MapPanel({ landmarks, chunks, coordinates, biome }: { landmarks: MapLandmark[]; chunks: MapChunkView[]; coordinates: string; biome: string }) {
+  const xValues = chunks.map((chunk) => chunk.x);
+  const zValues = chunks.map((chunk) => chunk.z);
+  const minX = Math.min(...xValues);
+  const maxX = Math.max(...xValues);
+  const minZ = Math.min(...zValues);
+  const maxZ = Math.max(...zValues);
+  const width = Math.max(1, maxX - minX + 1);
+  const height = Math.max(1, maxZ - minZ + 1);
   return (
     <div className="map-layout">
-      <div className="paper-map" aria-label="无玩家定位标记的地形图">
-        <span className="map-river" />
-        <span className="map-ridge" />
+      <div className="paper-map dynamic-map" aria-label={`已经探索 ${chunks.length} 个动态区块的地形图`}>
+        {chunks.map((chunk) => (
+          <span
+            key={chunk.key}
+            className={`map-chunk ${chunk.current ? "is-current" : ""}`}
+            title={`${chunk.biome} · 区块 ${chunk.key}`}
+            style={{
+              left: `${((chunk.x - minX) / width) * 100}%`,
+              top: `${((maxZ - chunk.z) / height) * 100}%`,
+              width: `${100 / width}%`,
+              height: `${100 / height}%`,
+              backgroundColor: chunk.color,
+            }}
+          />
+        ))}
         {landmarks.filter((landmark) => landmark.discovered).map((landmark) => (
-          <i key={landmark.id} className={`map-marker marker-${landmark.kind}`} style={{ left: `${((landmark.x + 54) / 108) * 100}%`, top: `${((54 - landmark.z) / 108) * 100}%` }}>
+          <i key={landmark.id} className={`map-marker marker-${landmark.kind}`} style={{ left: `${((landmark.x / 48 - minX) / width) * 100}%`, top: `${((maxZ + 1 - landmark.z / 48) / height) * 100}%` }}>
             <b>{landmark.kind === "camp" ? "⌂" : landmark.kind === "water" ? "≈" : "×"}</b><em>{landmark.label}</em>
           </i>
         ))}
-        <small className="map-note">地图不会显示你的位置。用手表坐标和地标判断方向。</small>
+        <small className="map-note">亮框表示当前 48m 区块；纸图会随探索向外扩展，标记仍需结合手表坐标判断。</small>
       </div>
-      <aside><small>手表坐标</small><strong>{coordinates}</strong><p>坠落点约在图中央。溪流位于南侧低地，气象站在东北山脊。</p><p className="pencil-note">“短路穿过蛇草坡，长路沿溪走。听见嘶声就停。”</p></aside>
+      <aside><small>手表坐标 · 当前生态</small><strong>{coordinates}</strong><p>{biome} · 已勘测 {chunks.length} 个区块。越过区块边界后，地形、资源承载力和动物种群会按世界种子继续生成。</p><p className="pencil-note">“把返程路线当作资源。食物会坏，工具会损耗，天气会改变安全路径。”</p></aside>
     </div>
   );
 }

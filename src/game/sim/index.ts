@@ -4,8 +4,16 @@ export {
   createEmptyInventory,
   createInitialState,
   cloneGameState,
+  migrateGameState,
   SIMULATION_VERSION,
 } from "./state";
+export {
+  getDurableToolInventoryStatus,
+  getPerishableInventoryStatus,
+  isDurableTool,
+  isPerishableItem,
+  LIFECYCLE_TICKS_PER_SECOND,
+} from "./lifecycle";
 export {
   applyCommand,
   stepSimulation,
@@ -30,6 +38,17 @@ export {
   isAtCamp,
   selectGameView,
 } from "./selectors";
-export type { SimulationView, SimulationViewEntity } from "./selectors";
-export { ITEM_IDS, RECIPE_IDS, TASK_IDS } from "./types";
+export type {
+  SimulationDurableToolView,
+  SimulationPerishableView,
+  SimulationView,
+  SimulationViewEntity,
+} from "./selectors";
+export {
+  DURABLE_TOOL_IDS,
+  ITEM_IDS,
+  PERISHABLE_ITEM_IDS,
+  RECIPE_IDS,
+  TASK_IDS,
+} from "./types";
 export type * from "./types";
