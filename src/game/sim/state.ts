@@ -1,4 +1,8 @@
-import { TASK_SEQUENCE, WORLD_ENTITY_TEMPLATES } from "./content";
+import {
+  RESOURCE_REGENERATION,
+  TASK_SEQUENCE,
+  WORLD_ENTITY_TEMPLATES,
+} from "./content";
 import { createRngChannels, hashSeed } from "./rng";
 import { ITEM_IDS } from "./types";
 import type {
@@ -23,6 +27,16 @@ function createWorldEntities(): Record<string, WorldEntity> {
         tags: [...template.tags],
         depleted: template.depleted ?? template.quantity <= 0,
       };
+      if (
+        entity.kind === "resource" &&
+        entity.itemId &&
+        RESOURCE_REGENERATION[entity.itemId]
+      ) {
+        entity.regeneration = {
+          capacity: Math.max(1, Math.floor(entity.quantity)),
+          nextTick: null,
+        };
+      }
       return [entity.id, entity];
     }),
   );
@@ -148,6 +162,9 @@ export function cloneGameState(state: GameState): GameState {
           {
             ...entity,
             position: { ...entity.position },
+            ...(entity.regeneration
+              ? { regeneration: { ...entity.regeneration } }
+              : {}),
             tags: [...entity.tags],
           },
         ]),

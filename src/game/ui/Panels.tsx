@@ -201,7 +201,7 @@ function NotebookPanel({ objectives, events, score }: { objectives: ObjectiveVie
     <div className="notebook-layout">
       <section><small className="section-kicker">目标链</small><div className="notebook-objectives">
         {objectives.map((objective, index) => <article key={objective.id} className={`${objective.completed ? "done" : ""} ${objective.current ? "current" : ""}`}>
-          <span>{objective.completed ? "✓" : String(index + 1).padStart(2, "0")}</span><div><strong>{objective.label}</strong><p>{objective.description}</p></div>
+          <span>{objective.completed ? "✓" : String(index + 1).padStart(2, "0")}</span><div><strong>{objective.label}</strong><p>{objective.progressLabel && <><b>{objective.progressLabel}</b><br /></>}{objective.description}{objective.blocker && <><br /><b>阻断条件：{objective.blocker}</b></>}</p></div>
         </article>)}
       </div></section>
       <section><small className="section-kicker">因果日志 · 生存评分 {score}</small><div className="field-log">

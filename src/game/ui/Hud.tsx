@@ -45,7 +45,11 @@ export function Hud({
       {objective && (
         <section className="objective-card" aria-label="当前目标">
           <span className="objective-index">{objective.completed ? "✓" : "当前"}</span>
-          <div><small>生存目标</small><strong>{objective.label}</strong><p>{objective.description}</p></div>
+          <div>
+            <small>{objective.progressLabel ?? "生存目标"}</small>
+            <strong>{objective.label}</strong>
+            <p>{objective.description}{objective.blocker && <><br /><b>阻断条件：{objective.blocker}</b></>}</p>
+          </div>
         </section>
       )}
 
@@ -60,7 +64,7 @@ export function Hud({
       </section>
 
       <div className={`crosshair ${target ? "has-target" : ""}`} aria-hidden="true"><i /><i /></div>
-      {target && <div className="interaction-prompt"><kbd>E</kbd><span>互动</span><strong>{target.label}</strong></div>}
+      {target && <div className="interaction-prompt"><kbd>E</kbd><span>{interactionVerb(target, objective)}</span><strong>{target.label}</strong></div>}
 
       {!pointerLocked && (
         <button className="focus-prompt" onClick={onFocusGame} disabled={!ready}>
@@ -78,6 +82,14 @@ export function Hud({
       </nav>
     </div>
   );
+}
+
+function interactionVerb(target: InteractionTarget, objective: ObjectiveView | null): string {
+  if (target.kind === "water") return "取水";
+  if (target.kind === "wreck" && objective?.id === "transmit-signal") return "发报";
+  if (target.kind === "wreck" || target.kind === "station" || target.kind === "cache") return "调查";
+  if (target.kind === "beacon") return "拆取";
+  return "采集";
 }
 
 function getCardinal(degrees: number): string {

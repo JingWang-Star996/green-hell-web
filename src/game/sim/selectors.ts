@@ -218,6 +218,9 @@ export interface SimulationViewEntity {
   available: boolean;
   quantity: number;
   itemId?: ItemId;
+  renewable: boolean;
+  capacity: number;
+  nextRegenerationTick: number | null;
 }
 
 export interface SimulationView {
@@ -292,6 +295,9 @@ export function selectGameView(state: GameState): SimulationView {
         available: !entity.depleted && entity.quantity > 0,
         quantity: entity.quantity,
         itemId: entity.itemId,
+        renewable: Boolean(entity.regeneration),
+        capacity: entity.regeneration?.capacity ?? entity.quantity,
+        nextRegenerationTick: entity.regeneration?.nextTick ?? null,
       }))
       .sort((left, right) => left.id.localeCompare(right.id)),
     inventory: { ...state.inventory },

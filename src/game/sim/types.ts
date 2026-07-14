@@ -121,6 +121,23 @@ export type WorldEntityKind =
   | "radio"
   | "hazard";
 
+/**
+ * Persistent lifecycle data for renewable resource nodes. The timestamps use
+ * simulation ticks so regeneration is deterministic and survives save/load.
+ * Its absence is intentional for finite resources such as the objective
+ * battery, and is also accepted when loading a legacy save.
+ */
+export interface ResourceRegenerationState {
+  capacity: number;
+  nextTick: number | null;
+}
+
+export interface ResourceRegenerationDefinition {
+  intervalSeconds: number;
+  amount: number;
+  minimumPlayerDistance: number;
+}
+
 export interface WorldEntity {
   id: string;
   kind: WorldEntityKind;
@@ -130,6 +147,7 @@ export interface WorldEntity {
   itemId?: ItemId;
   quantity: number;
   depleted: boolean;
+  regeneration?: ResourceRegenerationState;
   contamination?: number;
   tags: string[];
 }

@@ -15,6 +15,9 @@ const EYE_HEIGHT = 1.68;
 const WALK_SPEED = 3.35;
 const SPRINT_SPEED = 5.7;
 const INTERACT_DISTANCE = 3.2;
+const SURVEY_SHELTER_X = -35;
+const SURVEY_SHELTER_Z = 31;
+const SURVEY_SHELTER_YAW = -0.9;
 
 const defaultSnapshot: RenderSnapshot = {
   day: 1,
@@ -66,6 +69,14 @@ export class RainforestRenderer {
   private readonly fireGroup = new THREE.Group();
   private readonly fireLight = new THREE.PointLight(0xff7a2d, 0, 12, 2);
   private readonly signalLight = new THREE.PointLight(0xff3d2e, 0, 20, 2);
+  private birdFlock: THREE.InstancedMesh | null = null;
+  private birdWingPositions: THREE.BufferAttribute | null = null;
+  private birdMaterial: THREE.MeshBasicMaterial | null = null;
+  private fireflies: THREE.Points | null = null;
+  private fireflyBasePositions: Float32Array | null = null;
+  private fireflyMaterial: THREE.PointsMaterial | null = null;
+  private readonly wildlifeDummy = new THREE.Object3D();
+  private wildlifeTime = 0;
   private snapshot = defaultSnapshot;
   private animationFrame = 0;
   private running = false;
@@ -123,6 +134,7 @@ export class RainforestRenderer {
     this.createWorld();
     this.createRain();
     this.createCampfire();
+    this.createWildlife();
     this.bindEvents();
     this.resize();
     this.setPlayerPosition(0, 5, Math.PI);
@@ -449,6 +461,66 @@ export class RainforestRenderer {
       }
     });
     this.signalLight.intensity = this.snapshot.signalActive ? 3 + Math.sin(performance.now() * 0.008) * 1.4 : 0;
+    this.updateWildlife(delta, daylight);
+  }
+
+  private updateWildlife(delta: number, daylight: number): void {
+    this.wildlifeTime += delta;
+    const motionTime = this.reducedMotion ? 0 : this.wildlifeTime;
+
+    if (this.birdFlock && this.birdWingPositions && this.birdMaterial) {
+      const clearSky = 1 - THREE.MathUtils.smoothstep(this.snapshot.rain, 0.18, 0.82);
+      const birdActivity = THREE.MathUtils.smoothstep(daylight, 0.24, 0.68) * clearSky;
+      this.birdFlock.visible = birdActivity > 0.04;
+      this.birdMaterial.opacity = birdActivity * 0.78;
+      if (this.birdFlock.visible) {
+        const wingY = 0.08 + Math.sin(motionTime * 7.4) * 0.13;
+        this.birdWingPositions.setY(1, wingY);
+        this.birdWingPositions.setY(4, wingY);
+        this.birdWingPositions.needsUpdate = true;
+
+        const flockAngle = motionTime * 0.09;
+        const centerX = this.player.x + Math.cos(flockAngle) * 14;
+        const centerZ = this.player.z + Math.sin(flockAngle) * 14;
+        for (let i = 0; i < this.birdFlock.count; i += 1) {
+          const column = i - (this.birdFlock.count - 1) * 0.5;
+          const x = centerX + column * 1.35 + Math.sin(motionTime * 0.42 + i * 1.7) * 0.7;
+          const z = centerZ - Math.abs(column) * 0.62 + Math.cos(motionTime * 0.36 + i) * 0.45;
+          const scale = 0.72 + seeded(i * 9.1 + 2) * 0.34;
+          this.wildlifeDummy.position.set(x, terrainHeight(x, z) + 9.5 + (i % 3) * 0.38, z);
+          this.wildlifeDummy.rotation.set(
+            0,
+            -flockAngle + Math.PI * 0.5,
+            Math.sin(motionTime * 0.5 + i) * 0.08,
+          );
+          this.wildlifeDummy.scale.setScalar(scale);
+          this.wildlifeDummy.updateMatrix();
+          this.birdFlock.setMatrixAt(i, this.wildlifeDummy.matrix);
+        }
+        this.birdFlock.instanceMatrix.needsUpdate = true;
+      }
+    }
+
+    if (this.fireflies && this.fireflyBasePositions && this.fireflyMaterial) {
+      const night = THREE.MathUtils.smoothstep(1 - daylight, 0.3, 0.8);
+      const rainShelter = 1 - THREE.MathUtils.smoothstep(this.snapshot.rain, 0.28, 0.94) * 0.88;
+      const fireflyActivity = night * rainShelter;
+      this.fireflies.visible = fireflyActivity > 0.035;
+      this.fireflyMaterial.opacity = fireflyActivity * 0.92;
+      if (this.fireflies.visible && !this.reducedMotion) {
+        const positions = this.fireflies.geometry.attributes.position as THREE.BufferAttribute;
+        for (let i = 0; i < positions.count; i += 1) {
+          const offset = i * 3;
+          positions.setXYZ(
+            i,
+            this.fireflyBasePositions[offset] + Math.sin(motionTime * 0.74 + i * 1.37) * 0.16,
+            this.fireflyBasePositions[offset + 1] + Math.sin(motionTime * 1.12 + i * 0.83) * 0.24,
+            this.fireflyBasePositions[offset + 2] + Math.cos(motionTime * 0.67 + i * 1.11) * 0.16,
+          );
+        }
+        positions.needsUpdate = true;
+      }
+    }
   }
 
   private updateTarget(): void {
@@ -532,6 +604,7 @@ export class RainforestRenderer {
       }
       const object = createEntityObject(definition.kind);
       object.position.set(definition.x, terrainHeight(definition.x, definition.z), definition.z);
+      if (definition.kind === "cache") object.rotation.y = SURVEY_SHELTER_YAW;
       object.visible = definition.available;
       object.userData.entityId = definition.id;
       this.dynamicGroup.add(object);
@@ -680,22 +753,17 @@ export class RainforestRenderer {
     this.colliders.push({ x: 33, z: 27, radius: 3.4 });
     this.worldGroup.add(station);
 
-    const cave = new THREE.Group();
-    cave.position.set(-35, terrainHeight(-35, 31), 31);
-    for (let i = 0; i < 9; i += 1) {
-      const angle = (i / 9) * Math.PI * 2;
-      const rock = new THREE.Mesh(
-        new THREE.DodecahedronGeometry(1.6 + seeded(i) * 1.2, 0),
-        new THREE.MeshStandardMaterial({ color: i % 2 ? 0x42483b : 0x333c34, roughness: 1 }),
-      );
-      rock.position.set(Math.cos(angle) * 2.4, 1.2 + Math.sin(angle) * 1.1, Math.sin(angle) * 1.6);
-      rock.scale.y = 1.3;
-      cave.add(rock);
-    }
-    const opening = new THREE.Mesh(new THREE.CircleGeometry(1.7, 18), new THREE.MeshBasicMaterial({ color: 0x020302 }));
-    opening.position.set(0, 1.55, -1.67);
-    cave.add(opening);
-    this.worldGroup.add(cave);
+    const surveyShelter = createSurveyRockShelter();
+    surveyShelter.position.set(
+      SURVEY_SHELTER_X,
+      terrainHeight(SURVEY_SHELTER_X, SURVEY_SHELTER_Z),
+      SURVEY_SHELTER_Z,
+    );
+    surveyShelter.rotation.y = SURVEY_SHELTER_YAW;
+    this.worldGroup.add(surveyShelter);
+    this.addLocalColliderSegment(-2.18, -1.25, -2.18, 1.72, 0.58);
+    this.addLocalColliderSegment(2.18, -1.25, 2.18, 1.72, 0.58);
+    this.addLocalColliderSegment(-2.18, 1.72, 2.18, 1.72, 0.58);
 
     const shelter = createShelter();
     shelter.name = "player-shelter";
@@ -755,6 +823,87 @@ export class RainforestRenderer {
     this.worldGroup.add(this.fireGroup);
   }
 
+  private createWildlife(): void {
+    const birdCount = this.isLowPowerDevice() ? 4 : 7;
+    const birdGeometry = new THREE.BufferGeometry();
+    const birdPositions = new Float32Array([
+      0, 0, 0.18, -0.56, 0.08, 0, -0.08, 0, -0.14,
+      0, 0, 0.18, 0.56, 0.08, 0, 0.08, 0, -0.14,
+    ]);
+    this.birdWingPositions = new THREE.BufferAttribute(birdPositions, 3);
+    birdGeometry.setAttribute("position", this.birdWingPositions);
+    this.birdMaterial = new THREE.MeshBasicMaterial({
+      color: 0x101914,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+    });
+    this.birdFlock = new THREE.InstancedMesh(birdGeometry, this.birdMaterial, birdCount);
+    this.birdFlock.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.birdFlock.frustumCulled = false;
+    this.birdFlock.visible = false;
+    this.worldGroup.add(this.birdFlock);
+
+    const clusterCenters = [
+      { x: 1, z: 6 },
+      { x: 13, z: -12 },
+      { x: SURVEY_SHELTER_X + 2, z: SURVEY_SHELTER_Z - 3 },
+      { x: 29, z: 24 },
+    ];
+    const fireflyCount = this.isLowPowerDevice() ? 24 : 48;
+    const fireflyPositions = new Float32Array(fireflyCount * 3);
+    for (let i = 0; i < fireflyCount; i += 1) {
+      const center = clusterCenters[i % clusterCenters.length];
+      const radius = 1.3 + seeded(i * 4.7 + 3) * 3.2;
+      const angle = seeded(i * 8.3 + 5) * Math.PI * 2;
+      const x = center.x + Math.cos(angle) * radius;
+      const z = center.z + Math.sin(angle) * radius;
+      fireflyPositions[i * 3] = x;
+      fireflyPositions[i * 3 + 1] = terrainHeight(x, z) + 0.5 + seeded(i * 6.1 + 1) * 1.75;
+      fireflyPositions[i * 3 + 2] = z;
+    }
+    this.fireflyBasePositions = fireflyPositions.slice();
+    const fireflyGeometry = new THREE.BufferGeometry();
+    fireflyGeometry.setAttribute("position", new THREE.BufferAttribute(fireflyPositions, 3));
+    this.fireflyMaterial = new THREE.PointsMaterial({
+      color: 0xd9ff87,
+      size: this.isLowPowerDevice() ? 0.105 : 0.125,
+      sizeAttenuation: true,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    this.fireflies = new THREE.Points(fireflyGeometry, this.fireflyMaterial);
+    this.fireflies.frustumCulled = false;
+    this.fireflies.visible = false;
+    this.worldGroup.add(this.fireflies);
+  }
+
+  private addLocalColliderSegment(
+    fromX: number,
+    fromZ: number,
+    toX: number,
+    toZ: number,
+    radius: number,
+  ): void {
+    const length = Math.hypot(toX - fromX, toZ - fromZ);
+    const steps = Math.max(1, Math.ceil(length / (radius * 1.35)));
+    const cosine = Math.cos(SURVEY_SHELTER_YAW);
+    const sine = Math.sin(SURVEY_SHELTER_YAW);
+    for (let step = 0; step <= steps; step += 1) {
+      const progress = step / steps;
+      const localX = THREE.MathUtils.lerp(fromX, toX, progress);
+      const localZ = THREE.MathUtils.lerp(fromZ, toZ, progress);
+      this.colliders.push({
+        x: SURVEY_SHELTER_X + localX * cosine + localZ * sine,
+        z: SURVEY_SHELTER_Z - localX * sine + localZ * cosine,
+        radius,
+      });
+    }
+  }
+
   private isColliding(x: number, z: number): boolean {
     for (const collider of this.colliders) {
       if (Math.hypot(x - collider.x, z - collider.z) < collider.radius + 0.28) return true;
@@ -764,7 +913,13 @@ export class RainforestRenderer {
 
   private isSheltered(x: number, z: number): boolean {
     if (this.snapshot.shelterBuilt && Math.hypot(x - 3.4, z - 2.4) < 3.2) return true;
-    if (Math.hypot(x + 35, z - 31) < 4.1) return true;
+    const shelterOffsetX = x - SURVEY_SHELTER_X;
+    const shelterOffsetZ = z - SURVEY_SHELTER_Z;
+    const cosine = Math.cos(SURVEY_SHELTER_YAW);
+    const sine = Math.sin(SURVEY_SHELTER_YAW);
+    const shelterLocalX = shelterOffsetX * cosine - shelterOffsetZ * sine;
+    const shelterLocalZ = shelterOffsetX * sine + shelterOffsetZ * cosine;
+    if (Math.abs(shelterLocalX) < 1.95 && shelterLocalZ > -1.35 && shelterLocalZ < 1.55) return true;
     if (Math.hypot(x - 33, z - 27) < 5.2) return true;
     return false;
   }
@@ -867,16 +1022,111 @@ function createEntityObject(kind: RenderEntityKind): THREE.Object3D {
     marker.position.y = 0.1;
     group.add(marker);
   } else if (kind === "cache") {
-    const crate = mesh(new THREE.BoxGeometry(0.9, 0.48, 0.62), rough(0x7a6a42));
-    crate.position.y = 0.24;
-    const strap = mesh(new THREE.BoxGeometry(0.12, 0.5, 0.65), rough(0x383b34));
-    strap.position.y = 0.25;
-    group.add(crate, strap);
+    const crateMaterial = new THREE.MeshStandardMaterial({
+      color: 0x9a7840,
+      emissive: 0x1b1205,
+      emissiveIntensity: 0.34,
+      roughness: 0.88,
+    });
+    const crate = mesh(new THREE.BoxGeometry(1.14, 0.56, 0.78), crateMaterial);
+    crate.position.y = 0.3;
+    const lid = mesh(new THREE.BoxGeometry(1.2, 0.12, 0.84), rough(0xb08a4a));
+    lid.position.y = 0.62;
+    const metal = rough(0x343a34);
+    for (const x of [-0.36, 0.36]) {
+      const strap = mesh(new THREE.BoxGeometry(0.1, 0.7, 0.82), metal);
+      strap.position.set(x, 0.35, 0);
+      group.add(strap);
+    }
+    const surveyMark = mesh(
+      new THREE.PlaneGeometry(0.34, 0.2),
+      new THREE.MeshBasicMaterial({ color: 0xf0d077, side: THREE.DoubleSide }),
+    );
+    surveyMark.position.set(0, 0.38, -0.397);
+    group.add(crate, lid, surveyMark);
   } else if (kind === "station" || kind === "wreck" || kind === "beacon") {
     const marker = mesh(new THREE.OctahedronGeometry(0.2, 0), new THREE.MeshBasicMaterial({ color: kind === "station" ? 0xffcf6d : kind === "wreck" ? 0xf2763d : 0xff4d42 }));
     marker.position.y = 2.3;
     group.add(marker);
   }
+  return group;
+}
+
+function createSurveyRockShelter(): THREE.Group {
+  const group = new THREE.Group();
+  group.name = "survey-rock-shelter";
+  const rockGeometry = new THREE.DodecahedronGeometry(1, 0);
+  const stoneMaterials = [
+    new THREE.MeshStandardMaterial({ color: 0x3c4439, roughness: 1 }),
+    new THREE.MeshStandardMaterial({ color: 0x4a5142, roughness: 1 }),
+    new THREE.MeshStandardMaterial({ color: 0x303830, roughness: 1 }),
+  ];
+  let rockIndex = 0;
+  const addRock = (
+    x: number,
+    y: number,
+    z: number,
+    scaleX: number,
+    scaleY: number,
+    scaleZ: number,
+    rotation = 0,
+  ) => {
+    const rock = new THREE.Mesh(rockGeometry, stoneMaterials[rockIndex % stoneMaterials.length]);
+    rockIndex += 1;
+    rock.position.set(x, y, z);
+    rock.scale.set(scaleX, scaleY, scaleZ);
+    rock.rotation.set((rockIndex % 2 ? 0.08 : -0.06), rotation, (rockIndex % 3 - 1) * 0.06);
+    rock.castShadow = true;
+    rock.receiveShadow = true;
+    group.add(rock);
+  };
+
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < 3; i += 1) {
+      addRock(side * 2.16, 0.72 + (i % 2) * 0.08, -1.12 + i * 1.36, 0.88, 0.76, 0.98, i * 0.24);
+    }
+    addRock(side * 2.03, 1.55, -0.3, 0.76, 0.65, 0.9, side * 0.18);
+    addRock(side * 2.0, 1.58, 1.05, 0.8, 0.69, 0.88, side * -0.14);
+  }
+
+  for (let i = 0; i < 4; i += 1) {
+    addRock(-1.58 + i * 1.05, 0.68 + (i % 2) * 0.06, 1.68, 0.68, 0.72, 0.76, i * 0.3);
+  }
+  for (let i = 0; i < 3; i += 1) {
+    addRock(-1.08 + i * 1.08, 1.5, 1.62, 0.72, 0.66, 0.74, -i * 0.22);
+  }
+
+  const overhang = new THREE.Mesh(rockGeometry, stoneMaterials[1]);
+  overhang.position.set(0, 2.42, 0.18);
+  overhang.scale.set(2.72, 0.48, 1.72);
+  overhang.rotation.set(-0.04, 0.03, -0.025);
+  overhang.castShadow = true;
+  overhang.receiveShadow = true;
+  group.add(overhang);
+
+  const interior = new THREE.Mesh(
+    new THREE.PlaneGeometry(3.2, 1.9),
+    new THREE.MeshBasicMaterial({ color: 0x070b08, side: THREE.DoubleSide }),
+  );
+  interior.position.set(0, 1.02, 1.59);
+  group.add(interior);
+
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(3.65, 3.1),
+    new THREE.MeshStandardMaterial({ color: 0x252a20, roughness: 1, side: THREE.DoubleSide }),
+  );
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.set(0, 0.035, 0.2);
+  floor.receiveShadow = true;
+  group.add(floor);
+
+  const moss = new THREE.Mesh(
+    new THREE.PlaneGeometry(3.5, 0.38),
+    new THREE.MeshStandardMaterial({ color: 0x53663a, roughness: 1, side: THREE.DoubleSide }),
+  );
+  moss.position.set(0, 2.05, -1.34);
+  moss.rotation.x = -0.32;
+  group.add(moss);
   return group;
 }
 

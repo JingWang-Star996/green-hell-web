@@ -82,10 +82,13 @@ export function createGameViewModel(state: GameState, retainedRecipes: readonly 
   const objectives = TASK_SEQUENCE.map((id, index) => {
     const completed = state.objectives.completedTaskIds.includes(id);
     const current = state.objectives.currentTaskId === id;
+    const presentation = objectivePresentation(state, id, completed || current);
     return {
       id,
-      label: completed || current ? TASKS[id].label : `未确认线索 ${String(index + 1).padStart(2, "0")}`,
-      description: completed || current ? objectiveDescription(state, id) : "先解决当前生存问题，新的线索才会写入笔记。",
+      label: presentation.label ?? `未确认线索 ${String(index + 1).padStart(2, "0")}`,
+      description: presentation.description,
+      progressLabel: presentation.progressLabel,
+      blocker: presentation.blocker,
       completed,
       current,
     };
@@ -145,6 +148,9 @@ function toRenderEntity(state: GameState, entity: GameState["world"]["entities"]
   else if (entity.kind === "landmark") kind = entity.tags.includes("cache") ? "cache" : "station";
   else if (entity.kind === "hazard") kind = "snake";
   else kind = itemToRenderKind(entity.itemId);
+  const batteryCanBeRemoved =
+    entity.itemId !== "battery" ||
+    hasInspectedLandmark(state, "landmark.weather-station");
   return {
     id: entity.id,
     kind,
@@ -153,7 +159,7 @@ function toRenderEntity(state: GameState, entity: GameState["world"]["entities"]
     z: entity.position.z,
     interactRadius: entity.interactRadius,
     interactive:
-      entity.kind === "resource" ||
+      (entity.kind === "resource" && batteryCanBeRemoved) ||
       entity.kind === "water" ||
       ((entity.kind === "landmark" || entity.kind === "radio") &&
         (!hasInspectedLandmark(state, entity.id) ||
@@ -254,24 +260,154 @@ function toEventView(event: GameEvent): EventView {
   };
 }
 
-function objectiveDescription(state: GameState, taskId: (typeof TASK_SEQUENCE)[number]): string {
-  if (taskId === "establish-camp" && state.camp.fire.built && state.camp.shelterBuilt && state.camp.bedBuilt) {
-    return state.eventLog.some((event) => event.type === "rest-completed")
-      ? "休息验证完成；确认营火仍在燃烧。"
-      : "结构已经齐全。在棕榈床休息一次，验证遮蔽、火势与补给能否支撑过夜。";
+type ObjectivePresentation = Pick<ObjectiveView, "description"> &
+  Partial<Pick<ObjectiveView, "label" | "progressLabel" | "blocker">>;
+
+function objectivePresentation(
+  state: GameState,
+  taskId: (typeof TASK_SEQUENCE)[number],
+  revealed: boolean,
+): ObjectivePresentation {
+  if (!revealed) {
+    return { description: "先解决当前生存问题，新的线索才会写入笔记。" };
   }
-  if (taskId !== "recover-battery") return TASKS[taskId].description;
+  if (taskId === "treat-wound") {
+    if (state.inventory.bandage > 0) {
+      return {
+        label: "包扎左臂伤口",
+        description: "按 B 检查身体，或按 Tab 打开背包，对草药绷带选择“使用”。",
+        progressLabel: "首日生存 1/3",
+      };
+    }
+    if (state.inventory["medicinal-leaf"] > 0 && state.inventory.vine > 0) {
+      return {
+        label: "制作草药绷带",
+        description: "材料已经齐全。按 C 打开制作界面，制作一份草药绷带。",
+        progressLabel: "首日生存 1/3",
+        blocker: "绷带尚未制作。",
+      };
+    }
+    return {
+      label: "寻找止血材料",
+      description: "在坠落点附近寻找船子草和垂落藤蔓，分别靠近并按 E 采集至少一份。",
+      progressLabel: "首日生存 1/3",
+      blocker: `还需船子草 ${Math.max(0, 1 - state.inventory["medicinal-leaf"])}、藤条 ${Math.max(0, 1 - state.inventory.vine)}。`,
+    };
+  }
+  if (taskId === "purify-water") {
+    if (state.inventory["clean-water"] > 0) {
+      return {
+        label: "饮用煮沸净水",
+        description: "按 Tab 打开背包，对煮沸净水选择“饮用”，完成安全补水验证。",
+        progressLabel: "首日生存 2/3",
+      };
+    }
+    if (state.inventory["dirty-water"] > 0) {
+      return {
+        label: state.camp.fire.lit ? "煮沸浑浊溪水" : "点燃营火",
+        description: state.camp.fire.lit
+          ? "水和火已经准备好。按 C 打开制作界面，选择“煮沸净水”。"
+          : "浑浊溪水不能直接喝。回到坠落点搭建并点燃营火，再进行煮沸。",
+        progressLabel: "首日生存 2/3",
+        blocker: state.camp.fire.lit ? "溪水尚未煮沸。" : "缺少正在燃烧的营火。",
+      };
+    }
+    if (state.inventory["coconut-shell"] > 0) {
+      return {
+        label: "用椰壳收集溪水",
+        description: "按 M 查看地图，前往南侧溪流；靠近水边并按 E，用空椰壳取水。",
+        progressLabel: "首日生存 2/3",
+      };
+    }
+    if (state.inventory.coconut > 0 && state.inventory["stone-blade"] > 0) {
+      return {
+        label: "制作椰壳容器",
+        description: "按 C 打开制作界面，用石刃剖开椰子，得到两个盛水容器。",
+        progressLabel: "首日生存 2/3",
+        blocker: "还没有可盛水的空椰壳。",
+      };
+    }
+    return {
+      label: "准备取水容器",
+      description: "在溪流附近寻找落地椰子；采集两块石头制作石刃，再剖开椰子。",
+      progressLabel: "首日生存 2/3",
+      blocker: state.inventory.coconut <= 0 ? "缺少椰子。" : "缺少石刃；先采集两块石头。",
+    };
+  }
+  if (taskId === "establish-camp" && !state.camp.fire.built) {
+    return {
+      label: "搭建过夜营火",
+      description: "回到坠落点，准备 4 根木棍和 2 份干叶；按 C 搭建营火并补充燃料。",
+      progressLabel: "首日生存 3/3 · 营火",
+      blocker: "营火尚未搭建。",
+    };
+  }
+  if (taskId === "establish-camp" && !state.camp.shelterBuilt) {
+    return {
+      label: "搭建挡雨叶棚",
+      description: "准备石斧、6 根木棍、4 条藤和 4 片宽叶；回到坠落点按 C 搭建叶棚。",
+      progressLabel: "首日生存 3/3 · 遮蔽",
+      blocker: state.inventory.axe <= 0 ? "缺少石斧。" : "叶棚材料尚未备齐。",
+    };
+  }
+  if (taskId === "establish-camp" && !state.camp.bedBuilt) {
+    return {
+      label: "铺设离地棕榈床",
+      description: "准备 4 根木棍、2 条藤和 6 片宽叶；回到坠落点按 C 铺设棕榈床。",
+      progressLabel: "首日生存 3/3 · 睡眠",
+      blocker: "棕榈床尚未完成。",
+    };
+  }
+  if (taskId === "establish-camp" && state.camp.fire.built && state.camp.shelterBuilt && state.camp.bedBuilt) {
+    return {
+      label: "验证过夜营地",
+      description: state.eventLog.some((event) => event.type === "rest-completed")
+        ? "休息验证完成；确认营火仍在燃烧。"
+        : "结构已经齐全。确保营火正在燃烧，再打开制作界面选择“休息”。",
+      progressLabel: "首日生存 3/3 · 验证",
+      blocker: state.camp.fire.lit ? "还需要在棕榈床完成一次休息。" : "营火尚未点燃或已经熄灭。",
+    };
+  }
+  if (taskId !== "recover-battery") {
+    return { label: TASKS[taskId].label, description: TASKS[taskId].description };
+  }
   if (!hasInspectedLandmark(state, "landmark.camp-radio")) {
-    return "先回到坠落点拆检损坏电台，确认真正缺少的部件与旧航线。";
+    return {
+      label: "调查损坏电台",
+      description: "回到坠落点，对准损坏电台按 E 调查，确认远征所需部件与旧航线。",
+      progressLabel: "远征线索 1/5",
+      blocker: "尚未调查坠落点的损坏电台。",
+    };
   }
   if (!hasInspectedLandmark(state, "landmark.survey-cache")) {
-    return "电台记录指向西北岩棚。找到勘测箱，取回能避开沼地的坐标图。";
+    return {
+      label: "寻找西北勘测岩棚",
+      description: "按 M 打开地图，前往坠落点西北侧的勘测岩棚，调查里面的勘测箱。",
+      progressLabel: "远征线索 2/5",
+      blocker: "尚未取得勘测箱里的气象站坐标图。",
+    };
   }
   if (!hasInspectedLandmark(state, "landmark.weather-station")) {
-    return "坐标已经标在地图上。沿山脊抵达气象站，先调查控制柜。";
+    return {
+      label: "调查气象站控制柜",
+      description: "气象站已标在地图东北侧。抵达后先对准控制柜按 E 调查，不要直接拆电池。",
+      progressLabel: "远征线索 3/5",
+      blocker: "尚未调查气象站控制柜；此时电池不可拆卸。",
+    };
   }
-  if (state.inventory.axe <= 0) return "电池托架已锈死；带一把石斧回来撬开固定架。";
-  return "控制柜与工具都已就绪，拆下气象站电池并安全带回营地。";
+  if (state.inventory.axe <= 0) {
+    return {
+      label: "准备拆卸工具",
+      description: "电池托架已经锈死。按 C 打开制作界面，制作并携带一把石斧。",
+      progressLabel: "远征线索 4/5",
+      blocker: "背包中缺少石斧。",
+    };
+  }
+  return {
+    label: "拆取气象站电池",
+    description: "控制柜与工具都已就绪。对准电池按 E 拆下，再安全带回坠落点。",
+    progressLabel: "远征线索 5/5",
+  };
 }
 
 function formatClock(totalMinutes: number): string {
@@ -280,8 +416,10 @@ function formatClock(totalMinutes: number): string {
 }
 
 function formatCoordinates(x: number, z: number): string {
-  const southMinutes = Math.abs(7 + z * 0.018).toFixed(2).padStart(5, "0");
-  const westMinutes = Math.abs(18 + x * 0.021).toFixed(2).padStart(5, "0");
+  // The paper map uses +X as east and +Z as north. Moving in either positive
+  // direction therefore reduces the displayed west/south coordinate.
+  const southMinutes = Math.abs(7 - z * 0.018).toFixed(2).padStart(5, "0");
+  const westMinutes = Math.abs(18 - x * 0.021).toFixed(2).padStart(5, "0");
   return `03° ${southMinutes}' S / 61° ${westMinutes}' W`;
 }
 

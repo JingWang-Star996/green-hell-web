@@ -1,13 +1,14 @@
 import type { NextConfig } from "next";
 
-const githubPagesBase =
-  process.env.DEPLOY_TARGET === "github-pages" ? "/green-hell-web" : undefined;
+const deployTarget = process.env.DEPLOY_TARGET;
+const githubPagesBase = deployTarget === "github-pages" ? "/green-hell-web" : undefined;
+const toyAssetPrefix = deployTarget === "toy" ? "." : undefined;
 
 const nextConfig: NextConfig = {
   output: "export",
   trailingSlash: true,
   basePath: githubPagesBase,
-  assetPrefix: githubPagesBase,
+  assetPrefix: githubPagesBase ?? toyAssetPrefix,
   images: { unoptimized: true },
 };
 

@@ -242,7 +242,7 @@ export default function GameClient() {
             const now = performance.now();
             if (now - lastHudFrameRef.current >= 100) {
               lastHudFrameRef.current = now;
-              setCompassDegrees(normalizeDegrees(THREEYawToCompass(frame.yaw)));
+              setCompassDegrees(yawToCompassDegrees(frame.yaw));
             }
             stepDistanceRef.current += frame.distance;
             if (stepDistanceRef.current > (frame.sprinting ? 1.35 : 1.05)) {
@@ -661,8 +661,10 @@ function isGameState(payload: unknown): payload is GameState {
   return candidate.version === 1 && typeof candidate.seed === "number" && ["playing", "won", "lost"].includes(candidate.status ?? "") && Boolean(candidate.clock && candidate.player && candidate.inventory && candidate.world);
 }
 
-function THREEYawToCompass(yaw: number): number {
-  return (yaw * 180) / Math.PI;
+export function yawToCompassDegrees(yaw: number): number {
+  // Three.js looks down -Z at yaw 0, while the authored paper map uses +Z as
+  // north. The 180-degree offset keeps the compass, map and task directions in sync.
+  return normalizeDegrees((yaw * 180) / Math.PI + 180);
 }
 
 function readRetainedRecipes(): RecipeId[] {

@@ -12,6 +12,7 @@ import {
   stepSimulation,
 } from "../../src/game/sim/index";
 import type { GameState, Inventory, ItemId } from "../../src/game/sim/index";
+import { RESOURCE_REGENERATION } from "../../src/game/sim/content";
 
 function stockInventory(
   state: GameState,
@@ -143,6 +144,120 @@ test("an axe increases harvesting throughput without bypassing finite resource n
   assert.equal(axeResult.inventory.stick, 3);
   assert.equal(axeResult.world.entities[entityId].quantity, 7);
   assert.equal(axeResult.eventLog.at(-1)?.details?.harvestLimit, 3);
+});
+
+test("renewable resources lazily regenerate only after time passes away from the player", () => {
+  const entityId = "resource.stick.trail-01";
+  const definition = RESOURCE_REGENERATION.stick;
+  assert.ok(definition);
+
+  let state = createInitialState("renewable-distance");
+  const initialQuantity = state.world.entities[entityId].quantity;
+  state = applyCommand(state, {
+    type: "move-player",
+    position: state.world.entities[entityId].position,
+  });
+  state = applyCommand(state, { type: "pick-up", entityId });
+
+  const harvested = state.world.entities[entityId];
+  assert.equal(harvested.quantity, initialQuantity - 1);
+  assert.equal(harvested.regeneration?.capacity, initialQuantity);
+  assert.ok(
+    (harvested.regeneration?.nextTick ?? 0) > state.clock.tick,
+    "harvesting should schedule a deterministic future deadline",
+  );
+
+  state = stepSimulation(state, {}, definition.intervalSeconds + 2);
+  assert.equal(
+    state.world.entities[entityId].quantity,
+    initialQuantity - 1,
+    "a due node must not pop back while the player remains beside it",
+  );
+
+  state = applyCommand(state, {
+    type: "move-player",
+    position: { x: -50, y: 0, z: -50 },
+  });
+  assert.equal(state.world.entities[entityId].quantity, initialQuantity);
+  assert.equal(state.world.entities[entityId].regeneration?.nextTick, null);
+
+  const viewEntity = selectGameView(state).worldEntities.find(
+    (entity) => entity.id === entityId,
+  );
+  assert.equal(viewEntity?.renewable, true);
+  assert.equal(viewEntity?.capacity, initialQuantity);
+  assert.equal(viewEntity?.nextRegenerationTick, null);
+});
+
+test("resource regeneration deadlines and catch-up are deterministic", () => {
+  const entityId = "resource.grubs.log-01";
+  const makeHarvestedState = () => {
+    let state = createInitialState("regeneration-determinism");
+    state = applyCommand(state, {
+      type: "move-player",
+      position: state.world.entities[entityId].position,
+    });
+    return applyCommand(state, { type: "pick-up", entityId });
+  };
+  let left = makeHarvestedState();
+  let right = makeHarvestedState();
+  assert.deepEqual(
+    left.world.entities[entityId].regeneration,
+    right.world.entities[entityId].regeneration,
+  );
+
+  for (const state of [left, right]) {
+    state.player.position = { x: -50, y: 0, z: -50 };
+  }
+  const interval = RESOURCE_REGENERATION.grubs?.intervalSeconds ?? 0;
+  left = stepSimulation(left, {}, interval * 3 + 1);
+  right = stepSimulation(right, {}, interval * 3 + 1);
+
+  assert.deepEqual(left.world.entities[entityId], right.world.entities[entityId]);
+  assert.equal(
+    left.world.entities[entityId].quantity,
+    createInitialState(1).world.entities[entityId].quantity,
+  );
+});
+
+test("legacy resource nodes gain safe lifecycle defaults without instant refill", () => {
+  const entityId = "resource.vine.trail-01";
+  let state = createInitialState("legacy-resource-save");
+  const entity = state.world.entities[entityId];
+  const originalCapacity = entity.quantity;
+  entity.quantity = 0;
+  entity.depleted = true;
+  delete entity.regeneration;
+  state.player.position = { x: -50, y: 0, z: -50 };
+
+  state = stepSimulation(state, {}, FIXED_DT_SECONDS);
+  const migrated = state.world.entities[entityId];
+  assert.equal(migrated.quantity, 0, "legacy depletion must not refill immediately");
+  assert.equal(migrated.regeneration?.capacity, originalCapacity);
+  assert.ok((migrated.regeneration?.nextTick ?? 0) > state.clock.tick);
+
+  state = stepSimulation(
+    state,
+    {},
+    (RESOURCE_REGENERATION.vine?.intervalSeconds ?? 0) + 1,
+  );
+  assert.equal(state.world.entities[entityId].quantity, 1);
+  assert.equal(state.world.entities[entityId].depleted, false);
+});
+
+test("the objective battery never regenerates, including malformed legacy lifecycle data", () => {
+  const entityId = "resource.battery.weather-station";
+  let state = createInitialState("finite-battery");
+  const battery = state.world.entities[entityId];
+  battery.quantity = 0;
+  battery.depleted = true;
+  battery.regeneration = { capacity: 1, nextTick: state.clock.tick };
+  state.player.position = { x: -50, y: 0, z: -50 };
+
+  state = stepSimulation(state, {}, 600);
+  assert.equal(state.world.entities[entityId].quantity, 0);
+  assert.equal(state.world.entities[entityId].depleted, true);
+  assert.equal(state.world.entities[entityId].regeneration, undefined);
 });
 
 test("material observation unlocks knowledge instead of exposing every recipe at spawn", () => {

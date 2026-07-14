@@ -1,4 +1,11 @@
-import { ITEMS, RECIPES, TASKS, TASK_SEQUENCE } from "./content";
+import {
+  ITEMS,
+  RECIPES,
+  RESOURCE_REGENERATION,
+  TASKS,
+  TASK_SEQUENCE,
+  WORLD_ENTITY_TEMPLATES,
+} from "./content";
 import { drawRandom } from "./rng";
 import {
   canCraft,
@@ -22,6 +29,7 @@ import type {
   NutritionDelta,
   SimulationInput,
   Vec3,
+  WorldEntity,
 } from "./types";
 
 export const FIXED_HZ = 30;
@@ -33,6 +41,12 @@ const SPRINT_SPEED = 4.8;
 const STREAM_PARASITE_CHANCE = 0.56;
 const FIRE_RAIN_EXPOSURE_LIMIT = 4.5;
 const DAY_LENGTH_SECONDS = 20 * 60;
+const RESOURCE_REGENERATION_CHECK_TICKS = FIXED_HZ;
+const INITIAL_RESOURCE_CAPACITY = new Map(
+  WORLD_ENTITY_TEMPLATES.filter(
+    (entity) => entity.kind === "resource" && entity.itemId,
+  ).map((entity) => [entity.id, Math.max(1, Math.floor(entity.quantity))]),
+);
 
 interface EventInput {
   type: GameEventType;
@@ -176,6 +190,103 @@ function harvestWorkSeconds(state: GameState, itemId: ItemId, amount: number): n
   return 5 * amount;
 }
 
+function regenerationIntervalTicks(itemId: ItemId): number {
+  const definition = RESOURCE_REGENERATION[itemId];
+  return definition
+    ? Math.max(1, Math.round(definition.intervalSeconds * FIXED_HZ))
+    : 0;
+}
+
+function ensureResourceRegenerationState(
+  state: GameState,
+  entity: WorldEntity,
+): void {
+  if (entity.kind !== "resource" || !entity.itemId) return;
+  const definition = RESOURCE_REGENERATION[entity.itemId];
+  if (!definition) {
+    // Finite resources stay finite even if a malformed or experimental legacy
+    // save happened to contain lifecycle fields for them.
+    delete entity.regeneration;
+    return;
+  }
+
+  const templateCapacity = INITIAL_RESOURCE_CAPACITY.get(entity.id) ?? 1;
+  const savedCapacity = entity.regeneration?.capacity;
+  const capacity = Math.min(
+    999,
+    Math.max(
+      1,
+      templateCapacity,
+      entity.quantity,
+      Number.isFinite(savedCapacity) ? Math.floor(savedCapacity!) : 0,
+    ),
+  );
+  const savedNextTick = entity.regeneration?.nextTick;
+  const nextTick =
+    typeof savedNextTick === "number" &&
+    Number.isFinite(savedNextTick) &&
+    savedNextTick >= 0
+      ? Math.floor(savedNextTick)
+      : null;
+
+  entity.regeneration = { capacity, nextTick };
+  if (entity.quantity >= capacity) {
+    entity.regeneration.nextTick = null;
+  } else if (entity.regeneration.nextTick === null) {
+    // Legacy saves did not record the harvest time. Starting a fresh interval
+    // is deterministic and avoids granting an unexplained instant refill.
+    entity.regeneration.nextTick =
+      state.clock.tick + regenerationIntervalTicks(entity.itemId);
+  }
+}
+
+function scheduleResourceRegeneration(state: GameState, entity: WorldEntity): void {
+  if (!entity.itemId || !entity.regeneration) return;
+  if (
+    entity.quantity < entity.regeneration.capacity &&
+    entity.regeneration.nextTick === null
+  ) {
+    entity.regeneration.nextTick =
+      state.clock.tick + regenerationIntervalTicks(entity.itemId);
+  }
+}
+
+/**
+ * Lazily catches renewable nodes up from their saved deadline. Nothing grows
+ * continuously per tick, and overdue cycles are only materialized while the
+ * player is far enough away that resources cannot pop into view beside them.
+ */
+function refreshRenewableResources(state: GameState): void {
+  for (const entity of Object.values(state.world.entities)) {
+    if (entity.kind !== "resource" || !entity.itemId) continue;
+    ensureResourceRegenerationState(state, entity);
+    const regeneration = entity.regeneration;
+    const definition = RESOURCE_REGENERATION[entity.itemId];
+    if (!regeneration || !definition || regeneration.nextTick === null) continue;
+    if (state.clock.tick < regeneration.nextTick) continue;
+    if (
+      distanceBetween(state.player.position, entity.position) <
+      definition.minimumPlayerDistance
+    ) {
+      continue;
+    }
+
+    const intervalTicks = regenerationIntervalTicks(entity.itemId);
+    const elapsedCycles =
+      Math.floor((state.clock.tick - regeneration.nextTick) / intervalTicks) + 1;
+    const restored = Math.min(
+      regeneration.capacity - entity.quantity,
+      elapsedCycles * definition.amount,
+    );
+    entity.quantity += Math.max(0, restored);
+    entity.depleted = entity.quantity <= 0;
+    regeneration.nextTick =
+      entity.quantity >= regeneration.capacity
+        ? null
+        : regeneration.nextTick + elapsedCycles * intervalTicks;
+  }
+}
+
 function completeAvailableTasks(state: GameState, causeCode: string): void {
   let currentTaskId = state.objectives.currentTaskId;
   while (currentTaskId) {
@@ -305,6 +416,7 @@ function handlePickUp(
   entity.quantity -= acceptedAmount;
   entity.depleted = entity.quantity <= 0;
   if (entity.depleted) entity.quantity = 0;
+  scheduleResourceRegeneration(state, entity);
 
   appendEvent(state, {
     type: "resource-picked",
@@ -848,6 +960,7 @@ function applyCommandMutable(state: GameState, command: GameCommand): void {
   }
 
   normalizeState(state);
+  refreshRenewableResources(state);
   refreshCampObjective(state);
   completeAvailableTasks(state, command.type);
   checkTerminalState(state);
@@ -1055,6 +1168,13 @@ function normalizeState(state: GameState): void {
       ? Math.max(0, Math.min(999, Math.floor(count)))
       : 0;
   }
+  for (const entity of Object.values(state.world.entities)) {
+    entity.quantity = Number.isFinite(entity.quantity)
+      ? Math.max(0, Math.min(999, Math.floor(entity.quantity)))
+      : 0;
+    entity.depleted = entity.quantity <= 0;
+    ensureResourceRegenerationState(state, entity);
+  }
   if (!isPositionValid(state.player.position)) {
     state.player.position = { ...state.camp.position };
   } else {
@@ -1095,6 +1215,9 @@ function runFixedTick(
   updateWetness(state, movement, FIXED_DT_SECONDS);
   updateMetabolism(state, FIXED_DT_SECONDS);
   normalizeState(state);
+  if (state.clock.tick % RESOURCE_REGENERATION_CHECK_TICKS === 0) {
+    refreshRenewableResources(state);
+  }
   refreshCampObjective(state);
   completeAvailableTasks(state, "simulation-tick");
   checkTerminalState(state);

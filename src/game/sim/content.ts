@@ -3,10 +3,32 @@ import type {
   ItemId,
   RecipeDefinition,
   RecipeId,
+  ResourceRegenerationDefinition,
   TaskDefinition,
   TaskId,
   WorldEntityTemplate,
 } from "./types";
+
+/**
+ * Renewable world resources regrow one unit at deterministic simulation-time
+ * intervals. Objective/rare resources are deliberately absent from this map;
+ * in particular, the weather-station battery can never regenerate.
+ */
+export const RESOURCE_REGENERATION: Partial<
+  Record<ItemId, ResourceRegenerationDefinition>
+> = {
+  stone: { intervalSeconds: 480, amount: 1, minimumPlayerDistance: 12 },
+  stick: { intervalSeconds: 120, amount: 1, minimumPlayerDistance: 12 },
+  vine: { intervalSeconds: 240, amount: 1, minimumPlayerDistance: 12 },
+  "broad-leaf": { intervalSeconds: 180, amount: 1, minimumPlayerDistance: 12 },
+  "medicinal-leaf": { intervalSeconds: 300, amount: 1, minimumPlayerDistance: 14 },
+  "dry-leaf": { intervalSeconds: 240, amount: 1, minimumPlayerDistance: 12 },
+  coconut: { intervalSeconds: 360, amount: 1, minimumPlayerDistance: 14 },
+  "antiparasitic-herb": { intervalSeconds: 360, amount: 1, minimumPlayerDistance: 14 },
+  "palm-fruit": { intervalSeconds: 300, amount: 1, minimumPlayerDistance: 14 },
+  "brazil-nuts": { intervalSeconds: 420, amount: 1, minimumPlayerDistance: 14 },
+  grubs: { intervalSeconds: 180, amount: 1, minimumPlayerDistance: 12 },
+};
 
 export const ITEMS: Record<ItemId, ItemDefinition> = {
   stone: { id: "stone", label: "锋利石块", stackLimit: 24 },

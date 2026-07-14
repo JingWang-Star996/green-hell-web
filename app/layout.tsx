@@ -45,6 +45,9 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="zh-CN">
+      <head>
+        <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+      </head>
       <body>
         {children}
         <Script src="https://s1.hdslb.com/bfs/seed/toy/app/sdk/toy-sdk.js" strategy="afterInteractive" />

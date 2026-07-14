@@ -12,6 +12,8 @@ export type ObjectiveView = {
   id: string;
   label: string;
   description: string;
+  progressLabel?: string;
+  blocker?: string;
   completed: boolean;
   current: boolean;
 };
