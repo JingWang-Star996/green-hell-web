@@ -1,10 +1,19 @@
 import { checksum } from "./checksum";
+import {
+  compactGameStateSavePayload,
+  expandGameStateSavePayload,
+} from "../world/saveDelta";
 
 export type SaveSeed = string | number;
 
 export interface SaveEnvelope<T> {
   schema: number;
   content: string;
+  /**
+   * Monotonic identity for an explicitly replaced run. Legacy envelopes omit
+   * this field and are interpreted as epoch zero.
+   */
+  runEpoch?: number;
   revision: number;
   device: string;
   seed: SaveSeed;
@@ -16,6 +25,7 @@ export interface SaveEnvelope<T> {
 export interface CreateSaveEnvelopeOptions<T> {
   schema: number;
   content: string;
+  runEpoch?: number;
   revision: number;
   device: string;
   seed: SaveSeed;
@@ -25,7 +35,8 @@ export interface CreateSaveEnvelopeOptions<T> {
 
 export interface ValidateSaveEnvelopeOptions<T> {
   schema?: number;
-  content?: string;
+  /** Current content id or a compatibility allow-list for migratable saves. */
+  content?: string | readonly string[];
   payloadValidator?: (payload: unknown) => payload is T;
 }
 
@@ -41,9 +52,21 @@ export type EnvelopeValidation<T> =
   | { ok: true; envelope: SaveEnvelope<T> }
   | { ok: false; reason: EnvelopeFailureReason; error?: unknown };
 
-const ENVELOPE_KEYS = [
+const LEGACY_ENVELOPE_KEYS = [
   "schema",
   "content",
+  "revision",
+  "device",
+  "seed",
+  "simTick",
+  "payload",
+  "checksum",
+] as const;
+
+const CURRENT_ENVELOPE_KEYS = [
+  "schema",
+  "content",
+  "runEpoch",
   "revision",
   "device",
   "seed",
@@ -64,7 +87,7 @@ function validSeed(value: unknown): value is SaveSeed {
 }
 
 function unsignedInteger(value: unknown, minimum: number): value is number {
-  return Number.isInteger(value) && typeof value === "number" && value >= minimum;
+  return Number.isSafeInteger(value) && typeof value === "number" && value >= minimum;
 }
 
 function unsignedVersion(value: unknown): value is number {
@@ -75,6 +98,9 @@ function withoutChecksum<T>(envelope: SaveEnvelope<T>): Omit<SaveEnvelope<T>, "c
   return {
     schema: envelope.schema,
     content: envelope.content,
+    ...(Object.prototype.hasOwnProperty.call(envelope, "runEpoch")
+      ? { runEpoch: envelope.runEpoch }
+      : {}),
     revision: envelope.revision,
     device: envelope.device,
     seed: envelope.seed,
@@ -94,6 +120,9 @@ export function createSaveEnvelope<T>(
   if (typeof options.content !== "string" || options.content.length === 0) {
     throw new TypeError("content must be a non-empty string");
   }
+  if (options.runEpoch !== undefined && !unsignedVersion(options.runEpoch)) {
+    throw new TypeError("runEpoch must be an unsigned integer");
+  }
   if (!unsignedInteger(options.revision, 1)) {
     throw new TypeError("revision must be a positive integer");
   }
@@ -105,7 +134,17 @@ export function createSaveEnvelope<T>(
     throw new TypeError("simTick must be an unsigned integer");
   }
 
-  const envelope: SaveEnvelope<T> = { ...options, checksum: "" };
+  const envelope: SaveEnvelope<T> = {
+    schema: options.schema,
+    content: options.content,
+    ...(options.runEpoch === undefined ? {} : { runEpoch: options.runEpoch }),
+    revision: options.revision,
+    device: options.device,
+    seed: options.seed,
+    simTick: options.simTick,
+    payload: options.payload,
+    checksum: "",
+  };
   envelope.checksum = computeEnvelopeChecksum(envelope);
   return envelope;
 }
@@ -116,9 +155,12 @@ export function validateSaveEnvelope<T>(
 ): EnvelopeValidation<T> {
   if (!isRecord(value)) return { ok: false, reason: "invalid-shape" };
   const keys = Object.keys(value);
+  const expectedKeys = Object.prototype.hasOwnProperty.call(value, "runEpoch")
+    ? CURRENT_ENVELOPE_KEYS
+    : LEGACY_ENVELOPE_KEYS;
   if (
-    keys.length !== ENVELOPE_KEYS.length ||
-    ENVELOPE_KEYS.some((key) => !Object.prototype.hasOwnProperty.call(value, key))
+    keys.length !== expectedKeys.length ||
+    expectedKeys.some((key) => !Object.prototype.hasOwnProperty.call(value, key))
   ) {
     return { ok: false, reason: "invalid-shape" };
   }
@@ -126,6 +168,8 @@ export function validateSaveEnvelope<T>(
     !unsignedVersion(value.schema) ||
     typeof value.content !== "string" ||
     value.content.length === 0 ||
+    (Object.prototype.hasOwnProperty.call(value, "runEpoch") &&
+      !unsignedVersion(value.runEpoch)) ||
     !unsignedInteger(value.revision, 1) ||
     typeof value.device !== "string" ||
     value.device.length === 0 ||
@@ -147,7 +191,9 @@ export function validateSaveEnvelope<T>(
   if (options.schema !== undefined && envelope.schema !== options.schema) {
     return { ok: false, reason: "schema-mismatch" };
   }
-  if (options.content !== undefined && envelope.content !== options.content) {
+  const acceptedContent =
+    typeof options.content === "string" ? [options.content] : options.content;
+  if (acceptedContent !== undefined && !acceptedContent.includes(envelope.content)) {
     return { ok: false, reason: "content-mismatch" };
   }
   try {
@@ -170,11 +216,36 @@ export function parseSaveEnvelope<T>(
   } catch (error) {
     return { ok: false, reason: "invalid-json", error };
   }
-  return validateSaveEnvelope(value, options);
+  const stored = validateSaveEnvelope<unknown>(value, {
+    schema: options.schema,
+    content: options.content,
+  });
+  if (!stored.ok) return stored;
+
+  const expandedPayload = expandGameStateSavePayload(stored.envelope.payload);
+  if (expandedPayload === stored.envelope.payload) {
+    return validateSaveEnvelope(value, options);
+  }
+  const expanded = {
+    ...stored.envelope,
+    payload: expandedPayload,
+    checksum: "",
+  } as SaveEnvelope<unknown>;
+  expanded.checksum = computeEnvelopeChecksum(expanded);
+  return validateSaveEnvelope<T>(expanded, options);
 }
 
 export function serializeSaveEnvelope<T>(envelope: SaveEnvelope<T>): string {
   const validation = validateSaveEnvelope(envelope);
   if (!validation.ok) throw new TypeError(`Cannot serialize envelope: ${validation.reason}`);
-  return JSON.stringify(envelope);
+  const compactPayload = compactGameStateSavePayload(envelope.payload);
+  if (compactPayload === envelope.payload) return JSON.stringify(envelope);
+
+  const stored = {
+    ...envelope,
+    payload: compactPayload,
+    checksum: "",
+  } as SaveEnvelope<unknown>;
+  stored.checksum = computeEnvelopeChecksum(stored);
+  return JSON.stringify(stored);
 }

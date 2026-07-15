@@ -1,7 +1,7 @@
 {
   "manifestVersion": 1,
   "project": "CANOPY: First Night",
-  "lastReviewed": "2026-07-13",
+  "lastReviewed": "2026-07-15",
   "scope": "Game visuals, interface art, 3D scene content, and audio generated or redistributed by the runtime. General npm dependencies and host-platform SDKs are outside this asset manifest and remain governed by their own terms.",
   "originalProgrammaticAssets": [
     {
@@ -38,7 +38,7 @@
       "kind": "css-generated-interface",
       "sourceFiles": [
         "app/globals.css",
-        "app/icon.svg"
+        "public/icon.svg"
       ],
       "generatedFrom": [
         "project-authored CSS shapes, gradients, typography rules, and effects"

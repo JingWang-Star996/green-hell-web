@@ -10,6 +10,8 @@
     "build": "vinext build",
     "build:pages": "next build",
     "build:toy": "cross-env DEPLOY_TARGET=toy next build && node scripts/prepare-toy-build.mjs && node scripts/verify-toy-build.mjs",
+    "visual:audit": "node --import tsx scripts/visual-world-audit.ts",
+    "visual:baseline": "node --import tsx scripts/visual-v0-baseline.ts --output outputs/visual-v0-baseline.json",
     "start": "vinext start",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/**/*.test.ts",

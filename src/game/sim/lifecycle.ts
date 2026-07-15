@@ -1,4 +1,10 @@
-import { FOOD_SPOILAGE, ITEMS, TOOL_DURABILITY } from "./content";
+import {
+  FOOD_SPOILAGE,
+  ITEMS,
+  TOOL_DURABILITY,
+  TORCH_BURN_SEGMENT_SECONDS,
+} from "./content";
+import { FIXED_HZ } from "./time";
 import {
   DURABLE_TOOL_IDS,
   PERISHABLE_ITEM_IDS,
@@ -11,7 +17,12 @@ import {
   type PerishableItemId,
 } from "./types";
 
-export const LIFECYCLE_TICKS_PER_SECOND = 30;
+export const LIFECYCLE_TICKS_PER_SECOND = FIXED_HZ;
+export const ITEM_LIFECYCLE_BALANCE_VERSION = 2 as const;
+export const TORCH_FUEL_VERSION = 1 as const;
+export const MIGRATED_FOOD_MINIMUM_FRESHNESS = 0.25;
+export const TORCH_MAX_BURN_SECONDS =
+  TOOL_DURABILITY.torch.maxDurability * TORCH_BURN_SEGMENT_SECONDS;
 
 export interface PerishableInventoryStatus {
   itemId: PerishableItemId;
@@ -25,6 +36,8 @@ export interface DurableToolInventoryStatus {
   itemId: DurableToolId;
   quantity: number;
   durabilities: number[];
+  /** Exact per-unit fuel in the same weakest-first order; torch only. */
+  remainingUseSeconds?: number[];
   maxDurability: number;
   activeDurability: number;
 }
@@ -38,6 +51,25 @@ export interface ToolWearResult {
   itemId: DurableToolId;
   cost: number;
   durability: number;
+  maxDurability: number;
+  broken: boolean;
+}
+
+export interface TorchFuelUnit {
+  remainingBurnSeconds: number;
+  maxBurnSeconds: number;
+}
+
+export interface TakenTorchFuelUnit extends TorchFuelUnit {
+  wasEquipped: boolean;
+  remainingInventory: number;
+}
+
+export interface TorchBurnResult extends TorchFuelUnit {
+  consumedSeconds: number;
+  previousRemainingBurnSeconds: number;
+  durability: number;
+  previousDurability: number;
   maxDurability: number;
   broken: boolean;
 }
@@ -138,21 +170,147 @@ function reconcileTools(
   return tools.sort((left, right) => left.durability - right.durability);
 }
 
+function torchDurabilityForRemaining(remainingUseSeconds: number): number {
+  return Math.max(
+    1,
+    Math.min(
+      TOOL_DURABILITY.torch.maxDurability,
+      Math.ceil(remainingUseSeconds / TORCH_BURN_SEGMENT_SECONDS),
+    ),
+  );
+}
+
+function canonicalTorchTool(remainingUseSeconds: number): DurableToolState {
+  const remaining = Math.min(
+    TORCH_MAX_BURN_SECONDS,
+    Math.max(0, remainingUseSeconds),
+  );
+  return {
+    durability: torchDurabilityForRemaining(remaining),
+    maxDurability: TOOL_DURABILITY.torch.maxDurability,
+    remainingUseSeconds: remaining,
+  };
+}
+
+/**
+ * Purely projects canonical concrete torch units. Legacy inventory counts may
+ * materialize missing full units once; current-format counts never mint fuel.
+ */
+function normalizedTorchTools(
+  state: GameState,
+  legacyFuelShape: boolean,
+): DurableToolState[] {
+  const rawTools = Array.isArray(state.itemLifecycle?.tools?.torch)
+    ? state.itemLifecycle?.tools?.torch ?? []
+    : [];
+  const tools = rawTools.flatMap((tool) => {
+    if (!tool) return [];
+    const exact = tool.remainingUseSeconds;
+    if (typeof exact === "number" && Number.isFinite(exact) && exact > 0) {
+      return [canonicalTorchTool(exact)];
+    }
+    if (!legacyFuelShape) return [];
+    if (!Number.isFinite(tool.durability) || tool.durability <= 0) return [];
+    const legacyDurability = Math.max(
+      1,
+      Math.min(
+        TOOL_DURABILITY.torch.maxDurability,
+        Math.floor(tool.durability),
+      ),
+    );
+    return [
+      canonicalTorchTool(legacyDurability * TORCH_BURN_SEGMENT_SECONDS),
+    ];
+  });
+  tools.sort(
+    (left, right) =>
+      (left.remainingUseSeconds ?? 0) - (right.remainingUseSeconds ?? 0),
+  );
+
+  if (!legacyFuelShape) return tools;
+
+  const legacyCount = normalizedInventoryCount(state, "torch");
+  if (tools.length > legacyCount) {
+    // Preserve the existing generic-discard policy for old count reductions.
+    tools.splice(0, tools.length - legacyCount);
+  }
+  while (tools.length < legacyCount) {
+    tools.push(canonicalTorchTool(TORCH_MAX_BURN_SECONDS));
+  }
+  tools.sort(
+    (left, right) =>
+      (left.remainingUseSeconds ?? 0) - (right.remainingUseSeconds ?? 0),
+  );
+
+  const rawBurnDebt = state.player.torchBurnSeconds;
+  let burnDebt =
+    rawBurnDebt === Number.POSITIVE_INFINITY
+      ? Number.POSITIVE_INFINITY
+      : typeof rawBurnDebt === "number" && Number.isFinite(rawBurnDebt)
+        ? Math.max(0, rawBurnDebt)
+        : 0;
+  while (burnDebt > 0 && tools.length > 0) {
+    const active = tools[0];
+    const remaining = active.remainingUseSeconds ?? 0;
+    if (burnDebt >= remaining) {
+      burnDebt -= remaining;
+      tools.shift();
+      continue;
+    }
+    tools[0] = canonicalTorchTool(remaining - burnDebt);
+    burnDebt = 0;
+  }
+  return tools;
+}
+
 /** Mutates a working state to the current lifecycle shape without advancing time. */
 export function ensureItemLifecycleState(state: GameState): ItemLifecycleState {
+  const needsBalanceMigration = Boolean(
+    state.itemLifecycle &&
+      state.itemLifecycle.balanceVersion !== ITEM_LIFECYCLE_BALANCE_VERSION,
+  );
+  const needsTorchFuelMigration =
+    state.itemLifecycle?.torchFuelVersion !== TORCH_FUEL_VERSION;
   const lifecycle: ItemLifecycleState = {
+    balanceVersion: ITEM_LIFECYCLE_BALANCE_VERSION,
+    torchFuelVersion: TORCH_FUEL_VERSION,
     perishables: state.itemLifecycle?.perishables ?? {},
     tools: state.itemLifecycle?.tools ?? {},
   };
 
   for (const itemId of PERISHABLE_ITEM_IDS) {
-    lifecycle.perishables[itemId] = reconcileBatches(
+    const batches = reconcileBatches(
       state,
       itemId,
       normalizeBatches(lifecycle.perishables[itemId]),
     );
+    if (needsBalanceMigration) {
+      const minimumExpiry =
+        state.clock.tick +
+        Math.round(
+          FOOD_SPOILAGE[itemId].shelfLifeSeconds *
+            LIFECYCLE_TICKS_PER_SECOND *
+            MIGRATED_FOOD_MINIMUM_FRESHNESS,
+        );
+      for (const batch of batches) {
+        batch.expiresAtTick = Math.max(batch.expiresAtTick, minimumExpiry);
+      }
+    }
+    lifecycle.perishables[itemId] = batches;
   }
   for (const itemId of DURABLE_TOOL_IDS) {
+    if (itemId === "torch") {
+      const tools = normalizedTorchTools(state, needsTorchFuelMigration);
+      lifecycle.tools.torch = tools;
+      // Concrete canonical units own torch quantity. A malformed current save
+      // may lose an unbacked count, but can never gain a full fuel unit from it.
+      state.inventory.torch = tools.length;
+      continue;
+    }
+    // Durable item IDs can be added while the compatible version-1 save shape
+    // remains unchanged. Materialize an absent runtime key before any craft or
+    // equip path performs arithmetic on it.
+    state.inventory[itemId] = normalizedInventoryCount(state, itemId);
     lifecycle.tools[itemId] = reconcileTools(
       state,
       itemId,
@@ -162,6 +320,10 @@ export function ensureItemLifecycleState(state: GameState): ItemLifecycleState {
       ),
     );
   }
+  // This field survives only as a migration input for old envelopes. Keeping
+  // the canonical runtime at zero prevents burn debt from attaching to a later
+  // crafted or returned torch.
+  state.player.torchBurnSeconds = 0;
   state.itemLifecycle = lifecycle;
   return lifecycle;
 }
@@ -197,10 +359,18 @@ export function addLifecycleInventory(
     const maxDurability = TOOL_DURABILITY[itemId].maxDurability;
     const tools = lifecycle.tools[itemId] ?? [];
     for (let index = 0; index < accepted; index += 1) {
-      tools.push({ durability: maxDurability, maxDurability });
+      tools.push(
+        itemId === "torch"
+          ? canonicalTorchTool(TORCH_MAX_BURN_SECONDS)
+          : { durability: maxDurability, maxDurability },
+      );
     }
     lifecycle.tools[itemId] = tools.sort(
-      (left, right) => left.durability - right.durability,
+      (left, right) =>
+        itemId === "torch"
+          ? (left.remainingUseSeconds ?? 0) -
+            (right.remainingUseSeconds ?? 0)
+          : left.durability - right.durability,
     );
   }
   return accepted;
@@ -213,6 +383,17 @@ export function consumeLifecycleInventory(
   amount: number,
 ): number {
   const lifecycle = ensureItemLifecycleState(state);
+  if (itemId === "torch") {
+    const target = Math.min(
+      normalizedInventoryCount(state, itemId),
+      Math.max(0, Math.floor(amount)),
+    );
+    let consumed = 0;
+    while (consumed < target && takeNextTorchInventoryUnit(state)) {
+      consumed += 1;
+    }
+    return consumed;
+  }
   let remaining = Math.min(
     normalizedInventoryCount(state, itemId),
     Math.max(0, Math.floor(amount)),
@@ -230,6 +411,170 @@ export function consumeLifecycleInventory(
     }
   }
   return consumed;
+}
+
+/**
+ * Atomically transfers the weakest/next-use concrete torch out of inventory.
+ * The returned seconds are the unit's exact fuel ownership boundary.
+ */
+export function takeNextTorchInventoryUnit(
+  state: GameState,
+): TakenTorchFuelUnit | null {
+  const lifecycle = ensureItemLifecycleState(state);
+  const tools = lifecycle.tools.torch ?? [];
+  const tool = tools[0];
+  const remainingBurnSeconds = tool?.remainingUseSeconds;
+  if (
+    !tool ||
+    typeof remainingBurnSeconds !== "number" ||
+    !Number.isFinite(remainingBurnSeconds) ||
+    remainingBurnSeconds <= 0
+  ) {
+    return null;
+  }
+
+  const wasEquipped = state.player.equippedItem === "torch";
+  tools.shift();
+  state.inventory.torch = tools.length;
+  state.player.torchBurnSeconds = 0;
+  if (wasEquipped) state.player.equippedItem = null;
+  return {
+    remainingBurnSeconds,
+    maxBurnSeconds: TORCH_MAX_BURN_SECONDS,
+    wasEquipped,
+    remainingInventory: tools.length,
+  };
+}
+
+/** Returns one exact torch unit without rounding or refilling its fuel. */
+export function addTorchInventoryUnit(
+  state: GameState,
+  unit: Readonly<Pick<TorchFuelUnit, "remainingBurnSeconds">>,
+): boolean {
+  const remaining = unit.remainingBurnSeconds;
+  if (
+    !Number.isFinite(remaining) ||
+    remaining <= 0 ||
+    remaining > TORCH_MAX_BURN_SECONDS
+  ) {
+    return false;
+  }
+  const lifecycle = ensureItemLifecycleState(state);
+  const tools = lifecycle.tools.torch ?? [];
+  if (tools.length >= ITEMS.torch.stackLimit) return false;
+  tools.push(canonicalTorchTool(remaining));
+  tools.sort(
+    (left, right) =>
+      (left.remainingUseSeconds ?? 0) - (right.remainingUseSeconds ?? 0),
+  );
+  lifecycle.tools.torch = tools;
+  state.inventory.torch = tools.length;
+  return true;
+}
+
+/**
+ * Burns only the explicitly equipped concrete torch. Exhaustion removes that
+ * unit and leaves the player empty-handed even when a reserve exists.
+ */
+export function burnEquippedTorchFuel(
+  state: GameState,
+  seconds: number,
+): TorchBurnResult | null {
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  const lifecycle = ensureItemLifecycleState(state);
+  if (state.player.equippedItem !== "torch") return null;
+  const tools = lifecycle.tools.torch ?? [];
+  const tool = tools[0];
+  const previousRemainingBurnSeconds = tool?.remainingUseSeconds;
+  if (
+    !tool ||
+    typeof previousRemainingBurnSeconds !== "number" ||
+    previousRemainingBurnSeconds <= 0
+  ) {
+    state.player.equippedItem = null;
+    state.inventory.torch = tools.length;
+    return null;
+  }
+
+  const previousDurability = torchDurabilityForRemaining(
+    previousRemainingBurnSeconds,
+  );
+  const consumedSeconds = Math.min(seconds, previousRemainingBurnSeconds);
+  const nextRemaining = previousRemainingBurnSeconds - consumedSeconds;
+  const broken = nextRemaining <= 1e-9;
+  let durability = 0;
+  if (broken) {
+    tools.shift();
+    state.player.equippedItem = null;
+  } else {
+    const next = canonicalTorchTool(nextRemaining);
+    tools[0] = next;
+    durability = next.durability;
+  }
+  state.inventory.torch = tools.length;
+  state.player.torchBurnSeconds = 0;
+  return {
+    remainingBurnSeconds: broken ? 0 : nextRemaining,
+    maxBurnSeconds: TORCH_MAX_BURN_SECONDS,
+    consumedSeconds,
+    previousRemainingBurnSeconds,
+    durability,
+    previousDurability,
+    maxDurability: TOOL_DURABILITY.torch.maxDurability,
+    broken,
+  };
+}
+
+/**
+ * Removes the earliest-expiring unit while preserving its real deadline for a
+ * world processor. This prevents loading/unloading equipment from refreshing
+ * food freshness or duplicating an inventory batch.
+ */
+export function takePerishableInventoryUnit(
+  state: GameState,
+  itemId: PerishableItemId,
+): { itemId: PerishableItemId; expiresAtTick: number } | null {
+  const lifecycle = ensureItemLifecycleState(state);
+  if (normalizedInventoryCount(state, itemId) <= 0) return null;
+  const batches = lifecycle.perishables[itemId] ?? [];
+  const batch = batches[0];
+  if (!batch) return null;
+  const expiresAtTick = batch.expiresAtTick;
+  batch.quantity -= 1;
+  if (batch.quantity <= 0) batches.shift();
+  state.inventory[itemId] = Math.max(0, state.inventory[itemId] - 1);
+  return { itemId, expiresAtTick };
+}
+
+/**
+ * Returns a processed world item to inventory without resetting its age.
+ * World processors own the unit while it is outside the backpack, so the
+ * original/derived deadline must cross that boundary atomically as well.
+ */
+export function addPerishableInventoryUnitWithExpiry(
+  state: GameState,
+  itemId: PerishableItemId,
+  expiresAtTick: number,
+): boolean {
+  const lifecycle = ensureItemLifecycleState(state);
+  if (normalizedInventoryCount(state, itemId) >= ITEMS[itemId].stackLimit) {
+    return false;
+  }
+  const normalizedExpiry = Math.max(
+    state.clock.tick,
+    Math.floor(Number.isFinite(expiresAtTick) ? expiresAtTick : state.clock.tick),
+  );
+  state.inventory[itemId] += 1;
+  const batches = lifecycle.perishables[itemId] ?? [];
+  const matchingBatch = batches.find(
+    (batch) => batch.expiresAtTick === normalizedExpiry,
+  );
+  if (matchingBatch) matchingBatch.quantity += 1;
+  else batches.push({ quantity: 1, expiresAtTick: normalizedExpiry });
+  lifecycle.perishables[itemId] = batches.sort(
+    (left, right) => left.expiresAtTick - right.expiresAtTick,
+  );
+  return true;
 }
 
 export function expireSpoiledFood(state: GameState): SpoiledFoodResult[] {
@@ -262,6 +607,35 @@ export function damageDurableTool(
   if (state.inventory[itemId] <= 0 || tools.length <= 0) return null;
   const tool = tools[0];
   const appliedCost = Math.max(1, Math.floor(cost));
+  if (itemId === "torch") {
+    const remaining = tool.remainingUseSeconds;
+    if (
+      typeof remaining !== "number" ||
+      !Number.isFinite(remaining) ||
+      remaining <= 0
+    ) {
+      return null;
+    }
+    const nextRemaining =
+      remaining - appliedCost * TORCH_BURN_SEGMENT_SECONDS;
+    const broken = nextRemaining <= 1e-9;
+    let durability = 0;
+    if (broken) {
+      tools.shift();
+    } else {
+      const next = canonicalTorchTool(nextRemaining);
+      tools[0] = next;
+      durability = next.durability;
+    }
+    state.inventory.torch = tools.length;
+    return {
+      itemId,
+      cost: appliedCost,
+      durability,
+      maxDurability: TOOL_DURABILITY.torch.maxDurability,
+      broken,
+    };
+  }
   tool.durability -= appliedCost;
   const broken = tool.durability <= 0;
   const durability = Math.max(0, tool.durability);
@@ -311,6 +685,26 @@ export function getDurableToolInventoryStatus(
   state: GameState,
   itemId: DurableToolId,
 ): DurableToolInventoryStatus {
+  if (itemId === "torch") {
+    const tools = normalizedTorchTools(
+      state,
+      state.itemLifecycle?.torchFuelVersion !== TORCH_FUEL_VERSION,
+    );
+    const remainingUseSeconds = tools.map(
+      (tool) => tool.remainingUseSeconds ?? 0,
+    );
+    const durabilities = remainingUseSeconds.map(
+      torchDurabilityForRemaining,
+    );
+    return {
+      itemId,
+      quantity: tools.length,
+      durabilities,
+      remainingUseSeconds,
+      maxDurability: TOOL_DURABILITY.torch.maxDurability,
+      activeDurability: durabilities[0] ?? 0,
+    };
+  }
   const quantity = normalizedInventoryCount(state, itemId);
   const maxDurability = TOOL_DURABILITY[itemId].maxDurability;
   const tools = normalizeTools(

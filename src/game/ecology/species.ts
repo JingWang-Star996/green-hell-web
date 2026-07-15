@@ -30,6 +30,12 @@ export const ECOLOGY_SPECIES: Readonly<
     migrationChancePerStep: 0.13,
     minimumResidentsBeforeMigration: 2,
     movementRadius: 4.8,
+    combat: {
+      maxHealth: 30,
+      spearDamage: 48,
+      contactDamage: 0,
+      recoveryGameHours: 36,
+    },
     encounter: {
       kind: "huntable-prey",
       awarenessRadius: 8,
@@ -58,6 +64,12 @@ export const ECOLOGY_SPECIES: Readonly<
     migrationChancePerStep: 0.085,
     minimumResidentsBeforeMigration: 1,
     movementRadius: 3.2,
+    combat: {
+      maxHealth: 100,
+      spearDamage: 50,
+      contactDamage: 5,
+      recoveryGameHours: 72,
+    },
     encounter: {
       kind: "wary-herbivore",
       awarenessRadius: 13,
@@ -86,10 +98,52 @@ export const ECOLOGY_SPECIES: Readonly<
     migrationChancePerStep: 0.15,
     minimumResidentsBeforeMigration: 0,
     movementRadius: 6.2,
+    combat: {
+      maxHealth: 140,
+      spearDamage: 55,
+      contactDamage: 15,
+      recoveryGameHours: 96,
+    },
     encounter: {
       kind: "danger",
       awarenessRadius: 16,
       dangerLevel: 0.82,
+    },
+  },
+  "coiled-viper": {
+    id: "coiled-viper",
+    label: "卷藤蝰",
+    role: "predator",
+    activityPattern: "crepuscular",
+    biomeAffinity: {
+      "evergreen-rainforest": 0.94,
+      "river-wetland": 0.86,
+      "palm-grove": 0.72,
+      swamp: 1,
+      "rocky-highland": 0.36,
+    },
+    preferredMoisture: [0.5, 1],
+    preferredCanopy: [0.48, 1],
+    preferredRain: [0.08, 0.88],
+    // Authored route snakes are not consumed by the population ledger. These
+    // values remain complete so the species can join procedural ecology later.
+    baseCarryingCapacity: 1,
+    birthChancePerStep: 0.02,
+    immigrationChancePerStep: 0.025,
+    departureChancePerStep: 0.04,
+    migrationChancePerStep: 0.08,
+    minimumResidentsBeforeMigration: 0,
+    movementRadius: 0.65,
+    combat: {
+      maxHealth: 44,
+      spearDamage: 28,
+      contactDamage: 12,
+      recoveryGameHours: 48,
+    },
+    encounter: {
+      kind: "danger",
+      awarenessRadius: 7,
+      dangerLevel: 0.72,
     },
   },
 };

@@ -6,6 +6,11 @@ import { applyCommand } from "../../src/game/sim/simulation";
 import { createInitialState } from "../../src/game/sim/state";
 import type { GameState } from "../../src/game/sim/types";
 import { createGameViewModel } from "../../src/game/ui/viewModel";
+import {
+  CAMPAIGN_FACTS,
+  RIVER_GAUGE_POSITION,
+} from "../../src/game/sim/campaignContent";
+import { CANOPY_JUNCTION_POSITION } from "../../src/game/sim/canopyJunction";
 
 function beginBatteryObjective(): GameState {
   const state = createInitialState("battery-guidance");
@@ -51,7 +56,8 @@ test("battery objective exposes a five-stage title, progress and explicit blocke
   view = createGameViewModel(state);
   assert.equal(view.currentObjective?.label, "寻找西北勘测岩棚");
   assert.equal(view.currentObjective?.progressLabel, "远征线索 2/5");
-  assert.match(view.currentObjective?.description ?? "", /按 M 打开地图/);
+  assert.match(view.currentObjective?.description ?? "", /打开地图/);
+  assert.doesNotMatch(view.currentObjective?.description ?? "", /按 M/);
 
   state = inspect(state, "landmark.survey-cache");
   view = createGameViewModel(state);
@@ -62,7 +68,16 @@ test("battery objective exposes a five-stage title, progress and explicit blocke
   const batteryBeforeInspection = view.render.entities.find(
     (entity) => entity.id === "resource.battery.weather-station",
   );
-  assert.equal(batteryBeforeInspection?.interactive, false);
+  assert.equal(batteryBeforeInspection?.interactive, true);
+  assert.equal(batteryBeforeInspection?.affordance.state, "blocked");
+  assert.equal(
+    batteryBeforeInspection?.affordance.blocker,
+    "missing-prerequisite",
+  );
+  assert.deepEqual(
+    batteryBeforeInspection?.affordance.preview.missingPrerequisiteIds,
+    ["landmark.weather-station"],
+  );
 
   state = inspect(state, "landmark.weather-station");
   view = createGameViewModel(state);
@@ -76,8 +91,13 @@ test("battery objective exposes a five-stage title, progress and explicit blocke
 
   state.inventory.axe = 1;
   view = createGameViewModel(state);
+  assert.equal(view.currentObjective?.label, "装备石斧");
+  assert.match(view.currentObjective?.blocker ?? "", /尚未装备/);
+
+  state.player.equippedItem = "axe";
+  view = createGameViewModel(state);
   assert.equal(view.currentObjective?.label, "拆取气象站电池");
-  assert.equal(view.currentObjective?.progressLabel, "远征线索 5/5");
+  assert.equal(view.currentObjective?.progressLabel, "远征线索 5/5 · 拆卸");
   assert.equal(view.currentObjective?.blocker, undefined);
 });
 
@@ -104,4 +124,83 @@ test("first-night objectives expose the next concrete action instead of a generi
   state.objectives.currentTaskId = "establish-camp";
   objective = createGameViewModel(state).currentObjective;
   assert.equal(objective?.label, "搭建过夜营火");
+});
+
+test("A1 completion leaves an honest campaign interlude instead of an empty HUD", () => {
+  const state = createInitialState("a1-interlude-objective");
+  state.objectives.currentTaskId = null;
+  state.objectives.completedTaskIds = ["river-rising"];
+
+  const view = createGameViewModel(state);
+  assert.equal(view.currentObjective?.id, "campaign-interlude");
+  assert.equal(view.currentObjective?.label, "保持应急频道畅通");
+  assert.match(view.currentObjective?.description ?? "", /自由建造/);
+  assert.doesNotMatch(view.currentObjective?.description ?? "", /任务未完成|开发中/);
+});
+
+test("A1 guidance gives live distance and only pins the gauge after field discovery", () => {
+  const state = createInitialState("a1-gauge-discovery");
+  state.objectives.currentTaskId = "river-rising";
+  state.knowledge!.objectiveFacts = [
+    { ...CAMPAIGN_FACTS.riverRequestHeard, firstKnownTick: 10 },
+    { ...CAMPAIGN_FACTS.riverDefenseKitPrepared, firstKnownTick: 12 },
+  ];
+
+  let view = createGameViewModel(state);
+  assert.equal(view.currentObjective?.label, "清开水尺入口");
+  assert.match(view.currentObjective?.description ?? "", /距当前位置约 \d+ 米/);
+  assert.equal(
+    view.landmarks.find((landmark) => landmark.id === "river-gauge")?.discovered,
+    false,
+  );
+
+  state.player.position = {
+    x: RIVER_GAUGE_POSITION.x - 20,
+    y: 0,
+    z: RIVER_GAUGE_POSITION.z,
+  };
+  view = createGameViewModel(state);
+  assert.equal(
+    view.landmarks.find((landmark) => landmark.id === "river-gauge")?.discovered,
+    true,
+  );
+});
+
+test("A2 guidance exposes a staged field problem and pins C-17 only after discovery", () => {
+  const state = createInitialState("a2-canopy-guidance");
+  state.objectives.currentTaskId = "canopy-wind";
+  state.objectives.completedTaskIds = ["river-rising"];
+  state.knowledge!.objectiveFacts = [
+    { ...CAMPAIGN_FACTS.canopyRequestHeard, firstKnownTick: 10 },
+    { ...CAMPAIGN_FACTS.canopyProvisioned, firstKnownTick: 12 },
+  ];
+
+  let view = createGameViewModel(state);
+  assert.equal(view.currentObjective?.label, "证明零值不是真实天气");
+  assert.equal(view.currentObjective?.progressLabel, "第二幕 · 林冠没有风 2/6");
+  assert.match(view.currentObjective?.description ?? "", /距当前位置约 \d+ 米/);
+  assert.match(view.currentObjective?.description ?? "", /面板 0\.0/);
+  assert.equal(
+    view.landmarks.find((landmark) => landmark.id === "canopy-junction")?.discovered,
+    false,
+  );
+
+  state.player.position = {
+    x: CANOPY_JUNCTION_POSITION.x - 20,
+    y: 0,
+    z: CANOPY_JUNCTION_POSITION.z,
+  };
+  view = createGameViewModel(state);
+  assert.equal(
+    view.landmarks.find((landmark) => landmark.id === "canopy-junction")?.discovered,
+    true,
+  );
+
+  state.knowledge!.objectiveFacts.push({
+    ...CAMPAIGN_FACTS.canopyContradictionObserved,
+    firstKnownTick: 20,
+  });
+  view = createGameViewModel(state);
+  assert.equal(view.currentObjective?.label, "恢复传感链路");
+  assert.match(view.currentObjective?.description ?? "", /倒木|藤本/);
 });

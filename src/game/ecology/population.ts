@@ -102,6 +102,24 @@ function cloneEcologyState(state: EcologyState): EcologyState {
         { ...population },
       ]),
     ),
+    individuals: state.individuals
+      ? Object.fromEntries(
+          Object.entries(state.individuals).map(([id, individual]) => [
+            id,
+            {
+              ...individual,
+              ...(individual.corpse
+                ? {
+                    corpse: {
+                      ...individual.corpse,
+                      position: { ...individual.corpse.position },
+                    },
+                  }
+                : {}),
+            },
+          ]),
+        )
+      : {},
   };
 }
 
@@ -325,6 +343,7 @@ export function createEcologyState(
     worldSeed: String(worldSeed),
     simulatedThroughTick: normalizeTick(frame?.tick ?? 0),
     populations: {},
+    individuals: {},
   };
   ensureActivePopulations(state, normalizedChunks(frame?.activeChunks ?? []), clamp(frame?.rainIntensity ?? 0));
   return state;

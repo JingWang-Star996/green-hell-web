@@ -3,7 +3,10 @@ import test from "node:test";
 
 import { FOOD_SPOILAGE, TOOL_DURABILITY } from "../../src/game/sim/content";
 import {
+  FIXED_HZ,
+  ITEM_LIFECYCLE_BALANCE_VERSION,
   applyCommand,
+  authoredSnakeIndividualId,
   createInitialState,
   getDurableToolInventoryStatus,
   getPerishableInventoryStatus,
@@ -28,6 +31,34 @@ test("legacy saves gain full-life food batches and full-durability tools without
   assert.equal(food.secondsUntilNextSpoilage, FOOD_SPOILAGE.grubs.shelfLifeSeconds);
   assert.deepEqual(axe.durabilities, [TOOL_DURABILITY.axe.maxDurability]);
   assert.equal(migrated.version, 1, "the compatible save schema remains version 1");
+});
+
+test("pre-balance food batches keep their age but receive a minimum freshness window on migration", () => {
+  const legacy = createInitialState("legacy-short-food");
+  legacy.inventory.grubs = 1;
+  legacy.itemLifecycle = {
+    perishables: {
+      grubs: [{ quantity: 1, expiresAtTick: legacy.clock.tick + 1 }],
+    },
+    tools: {},
+  };
+
+  const migrated = migrateGameState(legacy);
+  const remaining =
+    (getPerishableInventoryStatus(migrated, "grubs").nextExpiryTick! -
+      migrated.clock.tick) /
+    FIXED_HZ;
+
+  assert.equal(
+    migrated.itemLifecycle?.balanceVersion,
+    ITEM_LIFECYCLE_BALANCE_VERSION,
+  );
+  assert.ok(remaining >= FOOD_SPOILAGE.grubs.shelfLifeSeconds * 0.25);
+  assert.equal(
+    legacy.itemLifecycle.perishables.grubs?.[0].expiresAtTick,
+    1,
+    "migration must not mutate the persisted payload",
+  );
 });
 
 test("perishable food expires on deterministic simulation ticks with explicit feedback", () => {
@@ -86,6 +117,7 @@ test("axe harvesting and spear encounters consume durability, break tools, and p
   let state = createInitialState("durability-actions");
   state.inventory.axe = 1;
   state = migrateGameState(state);
+  state = applyCommand(state, { type: "equip-item", itemId: "axe" });
   state.player.position = { ...state.world.entities[stickEntityId].position };
   state = applyCommand(state, {
     type: "pick-up",
@@ -112,8 +144,17 @@ test("axe harvesting and spear encounters consume durability, break tools, and p
   state.itemLifecycle!.tools.spear = [
     { durability: 5, maxDurability: TOOL_DURABILITY.spear.maxDurability },
   ];
+  state = applyCommand(state, { type: "equip-item", itemId: "spear" });
   state.player.position = { ...state.world.entities[hazardId].position };
-  state = applyCommand(state, { type: "encounter-hazard", entityId: hazardId });
+  const snakeId = authoredSnakeIndividualId(hazardId);
+  state = applyCommand(state, {
+    type: "attack-wildlife",
+    individualId: snakeId,
+  });
+  state = applyCommand(state, {
+    type: "attack-wildlife",
+    individualId: snakeId,
+  });
 
   assert.equal(state.inventory.spear, 0);
   assert.ok(state.eventLog.some((event) => event.type === "tool-broken"));
@@ -121,9 +162,8 @@ test("axe harvesting and spear encounters consume durability, break tools, and p
     getDurableToolInventoryStatus(state, "spear").activeDurability,
     0,
   );
-  assert.equal(
-    state.eventLog.at(-1)?.type,
-    "threat-avoided",
-    "the spear still resolves the encounter that breaks it",
+  assert.ok(
+    state.eventLog.some((event) => event.type === "wildlife-defeated"),
+    "the second explicit hit still defeats the snake after the spear breaks",
   );
 });

@@ -32,6 +32,8 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 /qa-http.*
+/.codex-dev.*.log
+/.mobile-dev.*.log
 
 # env files (can opt-in for committing if needed)
 .env*

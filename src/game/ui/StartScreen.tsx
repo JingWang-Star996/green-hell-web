@@ -1,10 +1,14 @@
+import { useState } from "react";
+
 type StartScreenProps = {
+  saveDiscoveryComplete: boolean;
   canContinue: boolean;
   onNewGame: () => void;
   onContinue: () => void;
 };
 
-export function StartScreen({ canContinue, onNewGame, onContinue }: StartScreenProps) {
+export function StartScreen({ saveDiscoveryComplete, canContinue, onNewGame, onContinue }: StartScreenProps) {
+  const [confirmNewGame, setConfirmNewGame] = useState(false);
   return (
     <section className="start-screen" aria-labelledby="game-title">
       <div className="start-atmosphere" aria-hidden="true">
@@ -24,13 +28,32 @@ export function StartScreen({ canContinue, onNewGame, onContinue }: StartScreenP
           再带着电池活着回到营地。
         </p>
         <div className="start-actions">
-          <button className="button-primary" onClick={onNewGame}>开始新远征 <span>→</span></button>
-          {canContinue && <button className="button-ghost" onClick={onContinue}>继续自动存档</button>}
+          <button className="button-primary" disabled={!saveDiscoveryComplete} onClick={() => canContinue ? setConfirmNewGame(true) : onNewGame()}>
+            {saveDiscoveryComplete ? "开始新远征" : "正在检查存档…"} <span>→</span>
+          </button>
+          {canContinue && (
+            <button
+              className="button-ghost"
+              disabled={!saveDiscoveryComplete}
+              aria-busy={!saveDiscoveryComplete}
+              onClick={onContinue}
+            >
+              {saveDiscoveryComplete ? "继续最近存档" : "正在核对 Toy 云存档…"}
+            </button>
+          )}
         </div>
+        {confirmNewGame && (
+          <div className="start-save-confirm" role="alert">
+            <strong>要覆盖现有进度吗？</strong>
+            <p>确认后会删除本地的主存档、备份与损坏隔离副本，并用新进度覆盖 Toy 云存档。配方知识仍会保留。</p>
+            <div><button className="button-danger" onClick={onNewGame}>删除并开始</button><button className="button-ghost" onClick={() => setConfirmNewGame(false)}>取消</button></div>
+          </div>
+        )}
         <div className="control-primer" aria-label="基本操作">
           <div><kbd>WASD</kbd><span>移动</span></div>
           <div><kbd>鼠标</kbd><span>观察</span></div>
           <div><kbd>E</kbd><span>互动</span></div>
+          <div><kbd>1–3</kbd><span>装备工具</span></div>
           <div><kbd>Tab</kbd><span>背包</span></div>
           <div><kbd>B</kbd><span>检查身体</span></div>
           <div><kbd>F</kbd><span>抬起手表</span></div>

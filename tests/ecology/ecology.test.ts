@@ -188,3 +188,88 @@ test("render and encounter projections are pure, stable consumer views", () => {
   assert.equal(encounters[0].distance, 0);
   assert.equal(encounters[0].urgency, 1);
 });
+
+test("individual ecology reacts to an observer and remembers a defeated animal sparsely", () => {
+  const activeChunk = chunk("1:1", 1, "palm-grove", 0.7, 0.7);
+  const state = createEcologyState("awareness", {
+    activeChunks: [activeChunk],
+    rainIntensity: 0.2,
+  });
+  for (const speciesId of ECOLOGY_SPECIES_IDS) {
+    state.populations[ecologyPopulationKey(activeChunk.key, speciesId)].count = 1;
+  }
+  const frame = {
+    tick: ECOLOGY_STEP_TICKS * 2,
+    rainIntensity: 0.2,
+    activeChunks: [activeChunk],
+  };
+  const baseline = projectEcologyForRender(state, frame);
+  const prey = baseline.find((candidate) => candidate.role === "small-prey");
+  const predator = baseline.find((candidate) => candidate.role === "predator");
+  assert.ok(prey);
+  assert.ok(predator);
+
+  const preyAware = projectEcologyForRender(state, {
+    ...frame,
+    observerPosition: prey.position,
+  }).find((candidate) => candidate.individualId === prey.individualId);
+  assert.equal(preyAware?.behavior, "flee");
+  assert.equal(preyAware?.awareness, 1);
+  assert.ok(
+    Math.hypot(
+      (preyAware?.position.x ?? prey.position.x) - prey.position.x,
+      (preyAware?.position.z ?? prey.position.z) - prey.position.z,
+    ) > 0,
+  );
+
+  const predatorAware = projectEcologyForRender(state, {
+    ...frame,
+    observerPosition: predator.position,
+  }).find((candidate) => candidate.individualId === predator.individualId);
+  assert.equal(predatorAware?.behavior, "stalk");
+
+  state.individuals ??= {};
+  state.individuals[prey.individualId] = {
+    speciesId: prey.speciesId,
+    health: 12,
+    maxHealth: prey.maxHealth,
+    lastHitTick: frame.tick,
+    defeatedAtTick: null,
+    respawnAtTick: null,
+  };
+  assert.equal(
+    projectEcologyForRender(state, frame).find(
+      (candidate) => candidate.individualId === prey.individualId,
+    )?.health,
+    12,
+  );
+  state.individuals[prey.individualId] = {
+    speciesId: prey.speciesId,
+    health: 0,
+    maxHealth: prey.maxHealth,
+    lastHitTick: frame.tick,
+    defeatedAtTick: frame.tick,
+    respawnAtTick: frame.tick + 100,
+    pendingMeat: 1,
+    pendingHide: 0,
+    corpse: {
+      chunkKey: prey.chunkKey,
+      position: { ...prey.position },
+      headingRadians: prey.headingRadians,
+    },
+  };
+  state.populations[ecologyPopulationKey(activeChunk.key, prey.speciesId)].count = 0;
+  const corpse = projectEcologyForRender(state, frame).find(
+    (candidate) => candidate.individualId === prey.individualId,
+  );
+  assert.ok(corpse, "sparse corpses do not depend on the current population count");
+  assert.equal(corpse.behavior, "dead");
+  assert.equal(corpse.visible, true);
+  assert.deepEqual(corpse.position, prey.position);
+  assert.equal(corpse.pendingMeat, 1);
+  assert.equal(
+    projectEcologyEncounters([corpse], prey.position).length,
+    0,
+    "a visible corpse is not a living encounter or threat",
+  );
+});

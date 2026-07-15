@@ -24,19 +24,52 @@ test("dynamic world coordinates survive simulation and legacy-bound migration", 
   assert.equal(moved.world.exploredChunks?.at(-1), "100:-75");
   assert.ok(moved.world.generatedResourceChunks?.includes("100:-75"));
   const generated = Object.values(moved.world.entities).find((entity) =>
-    entity.tags.includes("chunk:100:-75"),
+    entity.tags.includes("chunk:100:-75") &&
+    (!entity.semantic || entity.semantic.toolTier <= 1),
   );
   assert.ok(generated?.itemId);
-  const besideResource = applyCommand(moved, {
+  let besideResource = applyCommand(moved, {
     type: "move-player",
     position: generated!.position,
   });
+  const toolClass = generated!.semantic?.toolClass;
+  if (toolClass && toolClass !== "hand") {
+    const tool = {
+      blade: "stone-blade",
+      axe: "axe",
+      pick: "stone-pick",
+    }[toolClass] as "stone-blade" | "axe" | "stone-pick";
+    besideResource.inventory[tool] = 1;
+    besideResource = migrateGameState(besideResource);
+    besideResource = applyCommand(besideResource, {
+      type: "equip-item",
+      itemId: tool,
+    });
+  }
   const before = besideResource.inventory[generated!.itemId!];
-  const harvested = applyCommand(besideResource, {
-    type: "pick-up",
-    entityId: generated!.id,
-  });
-  assert.ok(harvested.inventory[generated!.itemId!] > before);
+  const beforeQuantity = besideResource.world.entities[generated!.id].quantity;
+  const harvested = generated!.semantic
+    ? applyCommand(besideResource, {
+        type: "harvest",
+        entityId: generated!.id,
+      })
+    : applyCommand(besideResource, {
+        type: "pick-up",
+        entityId: generated!.id,
+      });
+  if (generated!.semantic?.category === "tree") {
+    assert.ok(
+      harvested.world.entities[generated!.id].quantity < beforeQuantity,
+      "the first axe strike should advance tree structure damage",
+    );
+    assert.equal(
+      harvested.inventory[generated!.itemId!],
+      before,
+      "standing trees should not turn a single strike into loose inventory",
+    );
+  } else {
+    assert.ok(harvested.inventory[generated!.itemId!] > before);
+  }
 });
 
 test("ecology is persisted, advanced, and projected for the active biome", () => {

@@ -14,8 +14,12 @@ export {
   getHabitatSuitability,
 } from "./population";
 export {
+  MAX_ECOLOGY_FRAME_DETERRENTS,
   projectEcologyEncounters,
   projectEcologyForRender,
 } from "./projection";
-export { ECOLOGY_SPECIES_IDS } from "./types";
+export {
+  AUTHORED_ECOLOGY_SPECIES_IDS,
+  ECOLOGY_SPECIES_IDS,
+} from "./types";
 export type * from "./types";
