@@ -1,6 +1,6 @@
 # CANOPY: First Night — Release report
 
-> 状态：本轮玩家反馈闭环候选已冻结；619 项测试、类型检查、Lint、生产构建、Toy 构建、双重静态预检与本地桌面/移动 smoke 已通过。Toy ID `10228414336000` 的本轮预览、审核提交、GitHub 更新与飞书通知仍须填写真实外部返回值。
+> 状态：本轮玩家反馈闭环候选已提交 B站 Toy 审核，CLI 返回 `auditing`（审核中，尚未上线）；候选代码已推送 GitHub，最终结果已通知飞书会话“王鲸Codex”。
 > 记录日期：2026-07-15
 > 目的：把当前可交付内容、设计蓝图、已取得证据和仍缺少的真人/线上证据分开记录，避免把计划或自动化结果当成发布事实。
 
@@ -77,7 +77,7 @@
 | `npm run build:toy` | 通过 | 生成位置无关的单页入口闭包；验证脚本通过 |
 | `toy-out/` 包核对 | **19 文件 / 3,984,151 bytes（3.80 MiB）** | 项目验包器通过；官方 `toy_doctor.py` 为 `ok: true`、0 findings；远低于 140 MiB 上限 |
 | 本地 HTTP 入口检查 | 通过 | IPv6 本地入口返回标题 `CANOPY: First Night｜雨林第一夜` 并渲染 WebGL 游戏场景 |
-| 交互式浏览器 smoke | **本地候选通过；Toy 预览待执行** | 桌面完成同键开关、缺料标红/来源引导、暂停/存档；390×844 可达 7 个系统入口及装备；844×390 无文档横向溢出；console 抽查无本项目 error/warning |
+| 交互式浏览器 smoke | **本地候选与 Toy 预览通过** | 1920×1080 保持桌面 HUD；390×844 可达 7 个系统入口及装备；844×390 触控入口可见且无文档横向溢出；同键菜单、首个已校验恢复点、存档导出链接均实测通过；预览 console 无 error/warning |
 
 已执行的命令序列：
 
@@ -90,9 +90,9 @@ npm run build:toy
 python toy_doctor.py toy-out --slug green-hell-web --json
 ```
 
-本轮 Toy 发布门禁已通过 Vinext 生产构建、Toy 单页闭包构建和两套静态验包器。这里的“通过”只说明候选产物和本地验证成立；Toy 本轮预览与审核状态必须由后续 CLI 返回值填写，不能提前表述为已经提交或上线。
+本轮 Toy 发布门禁已通过 Vinext 生产构建、Toy 单页闭包构建和两套静态验包器。候选在预提交预览 `preview_A5hgExGh` 完成桌面、竖屏、短横屏与关键存档交互复核；最终 `toy update 10228414336000 toy-out --yes --json` 返回 `auditing`。该状态只表示已进入审核队列，不表示已经上线。
 
-本地 smoke 完成了桌面 HUD、同键菜单、制作缺料、移动端生存菜单与暂停/存档设置入口的可见点击检查；没有把短时 smoke 冒充完整真人流程。Toy 预览生成后仍需复核首屏、嵌套资源、390×844、844×390、导出准备与控制台；审核通过后再在生产 URL 复核 Pointer Lock、云存档和跨设备恢复。
+本地 smoke 完成了桌面 HUD、同键菜单、制作缺料、移动端生存菜单与暂停/存档设置入口的可见点击检查；没有把短时 smoke 冒充完整真人流程。Toy 预提交预览已复核首屏、嵌套资源、390×844、844×390、首个恢复点、导出准备与控制台；提交后返回的 `preview_RJ49vklQ` 再次完成首屏与零控制台错误抽查。审核通过后仍需在生产 URL 复核 Pointer Lock、Toy 云存档和跨设备恢复。
 
 ## 6. 原创 OG 图与宿主数据披露
 
@@ -106,22 +106,22 @@ python toy_doctor.py toy-out --slug green-hell-web --json
 - SDK 不可用、超时、返回无效数据或拒绝请求时，游戏继续使用本地存档；云失败不回滚已成功的本地写入。
 - 项目代码不请求姓名、邮箱或精确位置。外部脚本请求本身可能包含浏览器通常发送的网络元数据，适用平台的隐私与服务条款。
 
-## 7. 发布后填写的记录
+## 7. 外部发布记录
 
-以下字段只能由真实外部发布结果产生，本地门禁不能预填：
+以下记录均来自 2026-07-15 的真实 CLI、浏览器、GitHub 和飞书返回结果：
 
 | 字段 | 发布记录 |
 |---|---|
-| 发布 commit SHA 与 commit URL | `PUBLISH-TIME` |
-| GitHub PR URL、编号与最终状态 | `PUBLISH-TIME` |
-| GitHub 仓库 URL | `PUBLISH-TIME` |
-| GitHub Actions Pages run ID / URL / 结论 | `PUBLISH-TIME` |
-| GitHub Pages 最终 URL | `PUBLISH-TIME` |
-| Sites 项目 ID、部署 ID 与最终 URL | `PUBLISH-TIME` |
-| Toy 项目 ID、版本 ID 与最终 URL | ID `10228414336000`；本轮 preview/status `PUBLISH-TIME`；生产 URL `https://www.bilibili.com/toy/green-hell-web/index.html` 待审核通过后复测 |
-| 各线上 URL 的资源加载、直接刷新与控制台 smoke | `PUBLISH-TIME` |
-| 线上存档刷新恢复与 Toy 云降级 smoke | `PUBLISH-TIME`；正式 Toy 云同步与跨设备恢复仍需生产版复测 |
-| 飞书通知的目标会话、发送时间与消息摘要 | `PUBLISH-TIME` |
+| 发布候选 commit SHA 与 commit URL | `7a3b21d601f39be76af1e4306a68f1633f5fa615`；`https://github.com/JingWang-Star996/green-hell-web/commit/7a3b21d601f39be76af1e4306a68f1633f5fa615` |
+| GitHub PR URL、编号与最终状态 | `https://github.com/JingWang-Star996/green-hell-web/pull/1`；Draft PR #1，head 已包含候选提交；GitHub integration 更新标题/正文时返回 403，因此不宣称 PR 元数据已同步 |
+| GitHub 仓库 URL | `https://github.com/JingWang-Star996/green-hell-web`；分支 `agent/living-forest-foundation` 已推送 |
+| GitHub Actions Pages run ID / URL / 结论 | 本轮未运行；Toy 是本轮唯一托管发布目标 |
+| GitHub Pages 最终 URL | 本轮未发布 |
+| Sites 项目 ID、部署 ID 与最终 URL | 本轮不适用 |
+| Toy 项目 ID、版本 ID 与最终 URL | ID `10228414336000`；CLI 状态 `auditing`；审核预览 `https://www.bilibili.com/toy/preview/preview_RJ49vklQ/index.html`；CLI 未返回独立版本 ID；生产 URL `https://www.bilibili.com/toy/green-hell-web/index.html` 待审核通过后复测 |
+| 各线上 URL 的资源加载、直接刷新与控制台 smoke | 预提交 `preview_A5hgExGh`：1920×1080、390×844、844×390 与关键交互通过；提交后 `preview_RJ49vklQ`：首屏加载通过，console 0 error/warning |
+| 线上存档刷新恢复与 Toy 云降级 smoke | 预览内新周目生成 1 个“远征开始”已校验恢复点，导出生成真实 blob 下载链接；正式 Toy 云同步、跨设备恢复与生产 URL 刷新仍待审核通过后复测 |
+| 飞书通知的目标会话、发送时间与消息摘要 | “王鲸Codex”；2026-07-15 23:30（UTC+8）；已发送 Toy `auditing` 状态、最终预览、GitHub 候选、96 项矩阵、619/619 验收、主要修复与明确未完成边界 |
 
 若线上 smoke 出现启动、仓库子路径资源或存档回归，应回滚到上一个已知可用版本，而不是直接修改生成文件。
 
