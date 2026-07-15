@@ -37,13 +37,18 @@ test("mobile CSS collapses persistent clutter and has a short-height layout", ()
   assert.match(css, /max-height:\s*20dvh/);
   assert.match(
     css,
-    /@media \(pointer:\s*coarse\), \(any-pointer:\s*coarse\), \(max-width:\s*820px\), \(max-width:\s*1024px\) and \(max-height:\s*500px\)/,
-    "touch controls need primary-pointer, hybrid-touch, narrow-width and phone-landscape activation paths",
+    /@media \(pointer:\s*coarse\), \(any-pointer:\s*coarse\) and \(max-width:\s*1024px\), \(max-width:\s*820px\), \(max-width:\s*1024px\) and \(max-height:\s*500px\)/,
+    "touch controls need primary-pointer, bounded hybrid-touch, narrow-width and phone-landscape activation paths",
   );
   assert.match(
     css,
-    /@media \(max-height:\s*500px\) and \(pointer:\s*coarse\), \(max-height:\s*500px\) and \(any-pointer:\s*coarse\), \(max-width:\s*1024px\) and \(max-height:\s*500px\)/,
+    /@media \(max-height:\s*500px\) and \(pointer:\s*coarse\), \(max-height:\s*500px\) and \(any-pointer:\s*coarse\) and \(max-width:\s*1024px\), \(max-width:\s*1024px\) and \(max-height:\s*500px\)/,
     "the compact landscape layout must activate for 844x390 even when an embedded WebView omits pointer media features",
+  );
+  assert.doesNotMatch(
+    css,
+    /@media[^\n{]*\(any-pointer:\s*coarse\)\s*,/,
+    "a secondary touchscreen alone must not force mobile controls on a wide desktop",
   );
   assert.match(css, /\.touch-menu-drawer\s*\{[^}]*max-height:\s*calc\(100dvh/);
 });

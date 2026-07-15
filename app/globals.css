@@ -665,7 +665,7 @@ kbd { font-family: var(--mono); font-weight: 700; }
  * features altogether. The short-landscape fallback covers common 844x390 to
  * 932x430 phone viewports without turning the controls on for desktop widths.
  */
-@media (pointer: coarse), (any-pointer: coarse), (max-width: 820px), (max-width: 1024px) and (max-height: 500px) {
+@media (pointer: coarse), (any-pointer: coarse) and (max-width: 1024px), (max-width: 820px), (max-width: 1024px) and (max-height: 500px) {
   .touch-controls { display: block; }
   .equipment-bar { display: none; }
   .damage-impact-stack { top: calc(122px + var(--safe-top)); width: min(340px, calc(100vw - 104px)); }
@@ -780,7 +780,7 @@ kbd { font-family: var(--mono); font-weight: 700; }
   .storage-capability { justify-self: start; }
 }
 
-@media (max-height: 500px) and (pointer: coarse), (max-height: 500px) and (any-pointer: coarse), (max-width: 1024px) and (max-height: 500px) {
+@media (max-height: 500px) and (pointer: coarse), (max-height: 500px) and (any-pointer: coarse) and (max-width: 1024px), (max-width: 1024px) and (max-height: 500px) {
   .start-screen { overflow: auto; }
   .start-header { left: calc(12px + env(safe-area-inset-left, 0px)); height: 50px; }
   .wordmark-mark { width: 34px; height: 34px; }

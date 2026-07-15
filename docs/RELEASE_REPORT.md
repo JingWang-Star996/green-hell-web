@@ -75,7 +75,7 @@
 | `npm run build` | 通过 | Sites/Vinext 构建成功 |
 | `npm run build:pages` | 本轮未重跑 | GitHub Pages 不在本次外部写入范围内 |
 | `npm run build:toy` | 通过 | 生成位置无关的单页入口闭包；验证脚本通过 |
-| `toy-out/` 包核对 | **19 文件 / 3,984,105 bytes（3.80 MiB）** | 项目验包器通过；官方 `toy_doctor.py` 为 `ok: true`、0 findings；远低于 140 MiB 上限 |
+| `toy-out/` 包核对 | **19 文件 / 3,984,151 bytes（3.80 MiB）** | 项目验包器通过；官方 `toy_doctor.py` 为 `ok: true`、0 findings；远低于 140 MiB 上限 |
 | 本地 HTTP 入口检查 | 通过 | IPv6 本地入口返回标题 `CANOPY: First Night｜雨林第一夜` 并渲染 WebGL 游戏场景 |
 | 交互式浏览器 smoke | **本地候选通过；Toy 预览待执行** | 桌面完成同键开关、缺料标红/来源引导、暂停/存档；390×844 可达 7 个系统入口及装备；844×390 无文档横向溢出；console 抽查无本项目 error/warning |
 
