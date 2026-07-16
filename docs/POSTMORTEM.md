@@ -1,5 +1,7 @@
 # 《绿色地狱》网页版首版复盘与取证报告
 
+> 本文只复盘最初失败版本。包含后续重制、真实开发经验、Agent 协作、存档、多端和 Toy 发布门禁的最终总结，见 [CANOPY 开发总复盘与下一款游戏制作手册](CANOPY_DEVELOPMENT_RETROSPECTIVE_AND_NEXT_GAME_PLAYBOOK.md)。
+
 > 状态：首版失败复盘，作为重制立项的基线证据  
 > 审计日期：2026-07-13  
 > 审计对象：`green-hell-toy` 当前源码、配置、资源、依赖与既有静态产物  
@@ -35,7 +37,7 @@
 
 - [`app/page.tsx`](../app/page.tsx)：281 个物理行，包含状态、规则、概率、存档、动作、HUD、弹窗和全部页面结构。
 - [`app/globals.css`](../app/globals.css)：76 个物理行，包含整个视觉系统与响应式布局。
-- [`app/chatgpt-auth.ts`](../app/chatgpt-auth.ts)：存在但未被任何代码引用。
+- `app/chatgpt-auth.ts`：在首版审计快照中存在但未被任何代码引用；后续重制已删除该文件。
 - `public/`：只有 favicon 和脚手架默认 SVG，没有游戏场景、角色、物品、生物或 UI 素材。
 - `poster.png`：750×1334 的高质量宣传图，不在 `public/`，源码零引用，不会进入真实游戏体验。
 
