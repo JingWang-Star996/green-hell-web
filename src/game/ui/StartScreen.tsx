@@ -1,5 +1,11 @@
 import { useState } from "react";
 
+import {
+  CANONICAL_PLAYER_WIKI_URL,
+  GAME_RELEASE_NOTES,
+  LATEST_GAME_RELEASE,
+} from "../releaseNotes";
+
 type StartScreenProps = {
   saveDiscoveryComplete: boolean;
   canContinue: boolean;
@@ -42,6 +48,53 @@ export function StartScreen({ saveDiscoveryComplete, canContinue, onNewGame, onC
             </button>
           )}
         </div>
+        <nav className="start-utility-actions" aria-label="更新与玩家资料">
+          <details className="start-release-notes">
+            <summary>
+              <span>更新公告</span>
+              <small>{LATEST_GAME_RELEASE.buildId}</small>
+            </summary>
+            <div className="start-release-panel">
+              <header>
+                <div>
+                  <small>CANOPY RELEASE LOG</small>
+                  <strong>雨林更新记录</strong>
+                </div>
+                <span>{GAME_RELEASE_NOTES.length} 个版本</span>
+              </header>
+              <div className="start-release-list">
+                {GAME_RELEASE_NOTES.map((release, index) => (
+                  <article className="start-release-entry" key={release.buildId} aria-current={index === 0 ? "true" : undefined}>
+                    <div className="start-release-meta">
+                      <strong>{release.buildId}</strong>
+                      <time dateTime={release.date}>{release.date}</time>
+                      {index === 0 && (
+                        <span>{release.status === "candidate" ? "候选构建" : "当前版本"}</span>
+                      )}
+                    </div>
+                    <h2>{release.title}</h2>
+                    <ul>
+                      {release.changes.map((change) => (
+                        <li key={`${release.buildId}:${change.category}:${change.text}`}>
+                          <b>{change.category}</b>
+                          <span>{change.text}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </article>
+                ))}
+              </div>
+            </div>
+          </details>
+          <a
+            className="start-wiki-link"
+            href={CANONICAL_PLAYER_WIKI_URL}
+            target="_top"
+            rel="noopener noreferrer"
+          >
+            <span>玩家 Wiki</span><small>生存档案 ↗</small>
+          </a>
+        </nav>
         {confirmNewGame && (
           <div className="start-save-confirm" role="alert">
             <strong>要覆盖现有进度吗？</strong>
@@ -53,7 +106,7 @@ export function StartScreen({ saveDiscoveryComplete, canContinue, onNewGame, onC
           <div><kbd>WASD</kbd><span>移动</span></div>
           <div><kbd>鼠标</kbd><span>观察</span></div>
           <div><kbd>E</kbd><span>互动</span></div>
-          <div><kbd>1–3</kbd><span>装备工具</span></div>
+          <div><kbd>1–5</kbd><span>装备工具</span></div>
           <div><kbd>Tab</kbd><span>背包</span></div>
           <div><kbd>B</kbd><span>检查身体</span></div>
           <div><kbd>F</kbd><span>抬起手表</span></div>

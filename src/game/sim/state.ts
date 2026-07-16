@@ -210,7 +210,10 @@ export function createInitialState(seed: Seed = 1): GameState {
       inspectedLandmarkIds: [],
       observedItemIds: [],
       craftedRecipeIds: [],
-      announcedRecipeIds: [],
+      // The opening objective teaches the emergency bandage immediately. It
+      // must be visible before the player gathers ingredients, especially on
+      // a fresh mobile device with no local recipe profile.
+      announcedRecipeIds: ["bandage"],
       objectiveFacts: [],
     },
     progress: {

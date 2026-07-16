@@ -4,7 +4,7 @@ Use this file to test a question, not to collect vague impressions. Record obser
 
 ## Build under test
 
-- Date: 2026-07-15
+- Date: 2026-07-16
 - Version or commit: working branch `agent/living-forest-foundation`, post-`e2496eb` milestone work.
 - Platform and device: desktop Chromium at 1920×1080 and 1366×768; touch at 390×844, 844×390 and 667×375; current development build remains local/preview-only while the frozen earlier build is under Toy review.
 - Tester profile: one returning survival-game player who knows the old exceptions, plus one player who receives no explanation of which scenery is interactive.
@@ -34,7 +34,8 @@ Use this file to test a question, not to collect vague impressions. Record obser
 5. Threat sweep: approach a snake from visible and occluded angles; attempt avoidance and a pre-emptive attack; observe warning, strike window, hit/death state, and persistence.
 6. Ecology sweep: follow one non-snake animal for 60 seconds and record reactions to player distance, habitat, weather, food/water, or another animal.
 7. Persistence sweep: leave the active chunks, return, save/reload, and verify changed nodes, dead animals, fire/building state, and unchanged-world save growth.
-8. Data and artifacts to capture: target screenshots/video, predicted-vs-actual object table, exact action/time sequence, object IDs and state deltas, frame profile, save size, and console errors.
+8. Building reversibility sweep: place two smoke racks and one rain collector; verify busy racks reject dismantling, a collector reports exact stored-water loss, full refund inventory rejects atomically, and one exact selected instance disappears while its neighbour survives reload.
+9. Data and artifacts to capture: target screenshots/video, predicted-vs-actual object table, exact action/time sequence, object IDs and state deltas, frame profile, save size, and console errors.
 
 ## Device and density gates
 
@@ -46,6 +47,7 @@ Use this file to test a question, not to collect vague impressions. Record obser
 6. From camp, capture four cardinal views. Each must contain a foreground occluder, a midground leaf/vine mass and a distant canopy silhouette without introducing an unfocusable lookalike of an interactive plant.
 7. At dry midnight and full-rain midnight, use the same seed/position/yaw: resource type is recognizable at 10m, terrain direction is readable at 15m, and surfaces within 3m are not blown out.
 8. Export a save after changing a tree, resource, animal corpse and structure; import it over a different run, confirm the preview, verify the exact changes, then exercise the pre-import recovery path. Repeat once inside Toy preview on desktop and mobile.
+9. At desktop and both phone orientations, focus an empty smoke rack and rain collector: PC exposes R, touch exposes a 44px action, cancel owns default focus, confirmation lists every refund and water loss, and success creates a milestone recovery point.
 
 ## Observations
 
@@ -55,6 +57,13 @@ Use this file to test a question, not to collect vague impressions. Record obser
 - What the build did:
 - Relevant timings, counts, logs, screenshots, or video:
 
+### 2026-07-16 — Mobile status, pause menu and tree-collision focused pass
+
+- What the player did: started a fresh run at 390×844, expanded and collapsed the initial open-wound warning, opened ESC, changed sections with ArrowRight, then inspected the same pause state at 844×390.
+- Where attention went: the one-line “留意 / 开放伤口” summary remained discoverable without owning the centre of the screen; ESC presented one primary return action and four named categories instead of one long mixed page.
+- What the build did: portrait summary measured 220×44 at x158/y268 and had zero overlap with the objective, vitals, touch action or survival-menu button. Expanded details measured 224px high, exposed the treatment action and used bounded vertical scrolling. Portrait ESC stayed within 390×844, hid the redundant seven-item system navigator and kept all four category targets at 44px. At 844×390 the panel body scrolled vertically, the four tabs remained 44px and ArrowRight transferred both selection and focus.
+- Relevant timings, counts, logs, screenshots, or video: the first landscape pass found a 2px edge overlap between the 44px warning summary and event/save feedback; their compact-landscape top offset was moved from 96px to 104px and locked by a CSS contract test. The rebuilt Toy entry closure passed, but browser security policy prevented a second local reload after that final 8px spacing change, so the final offset has build/test evidence rather than a second screenshot. Tree escape was covered by per-collider geometry and tree-pool tests, not a full axe-playthrough in this focused pass.
+
 ## Interpretation
 
 - Supported, mixed, or rejected:
@@ -62,9 +71,20 @@ Use this file to test a question, not to collect vague impressions. Record obser
 - Alternative explanation:
 - Confidence and uncertainty:
 
+### 2026-07-16 interpretation
+
+- Supported: compact disclosure removes the persistent portrait obstruction while preserving urgency and the complete condition list; ESC category separation materially reduces initial choice load on both phone orientations.
+- Confidence and uncertainty: high for measured layout, focus order and deterministic collision contracts; medium for real-device touch feel and post-felling camera/body motion until the axe sequence is replayed in an actual Toy WebView.
+
 ## Decision
 
 - Keep, change, remove, or test again:
 - Next smallest experiment:
 - Gate requiring user judgment:
 - Known limitation carried forward:
+
+### 2026-07-16 decision
+
+- Keep: compact persistent-state summary, four-section ESC information architecture, keyboard tab navigation and low-stump step-over behavior.
+- Next smallest experiment: fell one semantic tree while standing inside both its old trunk radius and future fall capsule on a real phone, then verify outward movement, re-entry blocking and camera stability without debug repositioning.
+- Known limitation carried forward: the final 104px compact-landscape spacing still needs one Toy WebView screenshot after publication; this does not block the local build because the relevant CSS contract, typecheck and Toy closure verification pass.

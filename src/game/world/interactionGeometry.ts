@@ -193,8 +193,27 @@ export function isPointBlocked(
   z: number,
   padding = 0.28,
 ): boolean {
+  return colliderPenetrationDepth(collider, x, z, padding) > 0;
+}
+
+/**
+ * Positive XZ penetration depth for one player-sized point. Keeping the
+ * amount, rather than only a boolean, lets a player escape a collider that
+ * appeared around them after a world-state transition (for example a felled
+ * tree) without permitting movement farther into the obstacle.
+ */
+export function colliderPenetrationDepth(
+  collider: WorldCollider,
+  x: number,
+  z: number,
+  padding = 0.28,
+): number {
+  const resolvedPadding = Number.isFinite(padding) ? Math.max(0, padding) : 0;
   if (collider.kind === "circle") {
-    return Math.hypot(x - collider.x, z - collider.z) < collider.radius + padding;
+    return Math.max(
+      0,
+      collider.radius + resolvedPadding - Math.hypot(x - collider.x, z - collider.z),
+    );
   }
   if (collider.kind === "capsule") {
     const segmentX = collider.endX - collider.startX;
@@ -214,14 +233,61 @@ export function isPointBlocked(
           );
     const closestX = collider.startX + segmentX * projection;
     const closestZ = collider.startZ + segmentZ * projection;
-    return (
-      Math.hypot(x - closestX, z - closestZ) < collider.radius + padding
+    return Math.max(
+      0,
+      collider.radius +
+        resolvedPadding -
+        Math.hypot(x - closestX, z - closestZ),
     );
   }
-  return (
-    Math.abs(x - collider.x) < collider.halfWidth + padding &&
-    Math.abs(z - collider.z) < collider.halfDepth + padding
-  );
+  const overlapX =
+    collider.halfWidth + resolvedPadding - Math.abs(x - collider.x);
+  const overlapZ =
+    collider.halfDepth + resolvedPadding - Math.abs(z - collider.z);
+  return Math.max(0, Math.min(overlapX, overlapZ));
+}
+
+/**
+ * Normal movement may never enter an obstacle. If a dynamic collider already
+ * contains the player, each pre-existing penetration must stay level or get
+ * shallower, at least one must improve, and no new collider may be entered.
+ * Comparing collider-by-collider prevents trading one obstacle for another.
+ */
+export function canMovePointThroughColliders(
+  colliders: readonly WorldCollider[],
+  from: Readonly<{ x: number; z: number }>,
+  to: Readonly<{ x: number; z: number }>,
+  padding = 0.28,
+): boolean {
+  const epsilon = 0.0001;
+  let currentlyTrapped = false;
+  let strictlyImproved = false;
+  let nextBlocked = false;
+  for (const collider of colliders) {
+    const currentDepth = colliderPenetrationDepth(
+      collider,
+      from.x,
+      from.z,
+      padding,
+    );
+    const nextDepth = colliderPenetrationDepth(
+      collider,
+      to.x,
+      to.z,
+      padding,
+    );
+    if (currentDepth > epsilon) currentlyTrapped = true;
+    if (nextDepth <= epsilon) {
+      if (currentDepth > epsilon) strictlyImproved = true;
+      continue;
+    }
+    nextBlocked = true;
+    if (currentDepth <= epsilon || nextDepth > currentDepth + epsilon) {
+      return false;
+    }
+    if (nextDepth < currentDepth - epsilon) strictlyImproved = true;
+  }
+  return !nextBlocked || (currentlyTrapped && strictlyImproved);
 }
 
 export function weatherStationCollider(): BoxCollider {

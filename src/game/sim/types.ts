@@ -473,6 +473,7 @@ export type GameEventType =
   | "structure-fuel-added"
   | "structure-ignited"
   | "structure-extinguished"
+  | "structure-dismantled"
   | "campaign-fact-recorded"
   | "radio-message-received"
   | "task-completed"
@@ -629,6 +630,7 @@ export type GameCommand =
   | { type: "encounter-wildlife"; individualId: string }
   | { type: "collect-wildlife-loot"; individualId: string }
   | { type: "use-structure"; structureId: string }
+  | { type: "dismantle-structure"; structureId: string }
   | { type: "rest"; structureId?: string }
   | { type: "transmit"; structureId?: string }
   | { type: "continue-expedition" };

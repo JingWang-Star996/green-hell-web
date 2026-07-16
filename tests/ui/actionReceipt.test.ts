@@ -217,6 +217,24 @@ test("torch-waymark maintenance produces an exact successful receipt and visible
   assert.equal(byMessage.get("暴雨压灭路标。"), "warning");
 });
 
+test("a successful dismantle owns a good, command-specific receipt", () => {
+  const receipt = receiptFor(
+    { type: "dismantle-structure", structureId: "rack.receipt" },
+    [
+      gameEvent(
+        11,
+        "structure-dismantled",
+        "已拆除烟熏架，返还 木棍×2、藤条×1。",
+        "command",
+        { structureId: "rack.receipt", kind: "smoking-rack" },
+      ),
+    ],
+  );
+  assert.equal(receipt.primary.type, "structure-dismantled");
+  assert.equal(receipt.status, "completed");
+  assert.equal(receipt.tone, "good");
+});
+
 test("the receipt queue is bounded and expires by TTL", () => {
   const first = receiptFor(
     { type: "collect-rainwater" },

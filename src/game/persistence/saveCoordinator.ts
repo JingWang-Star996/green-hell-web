@@ -234,6 +234,7 @@ export function autosaveReasonForEvents(events: readonly AutosaveEvent[]): SaveR
         event.type === "wildlife-defeated" ||
         event.type === "wildlife-loot-collected" ||
         event.type === "structure-fuel-added" ||
+        event.type === "structure-dismantled" ||
         (event.type === "structure-output-collected" &&
           event.details?.itemId === "clean-water") ||
         (event.type === "resource-picked" && event.details?.itemId === "battery") ||

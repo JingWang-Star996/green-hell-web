@@ -30,6 +30,7 @@ test("save transfer UI exposes portable export, file input, durability, and dest
   }));
   assert.match(markup, /仅本次页面/);
   assert.match(markup, /type="file"/);
+  assert.match(markup, /type="file" tabindex="-1" aria-hidden="true"/);
   assert.match(markup, /\.canopy-save\.json/);
   assert.match(markup, /确认替换并同步/);
   assert.match(markup, /导入前恢复点/);

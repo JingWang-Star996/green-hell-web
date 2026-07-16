@@ -43,7 +43,33 @@ test("player feedback names severity, source, damage and action without relying 
   assert.match(markup, /来源方向 90°（右侧）/);
   assert.match(markup, /寻找安全水源/);
   assert.match(markup, /data-severity="critical"/);
+  assert.match(markup, /<details class="status-signal-mobile-tray status-signal-mobile-critical">/);
+  assert.match(markup, /<summary aria-label="状态提醒：水分不足。点按展开详情">/);
+  assert.doesNotMatch(markup, /<details[^>]*\sopen(?:=|\s|>)/);
   assert.doesNotMatch(markup, /status-signal-stack" aria-live/);
+});
+
+test("mobile status tray collapses several persistent signals behind one compact summary", () => {
+  const signals = ["开放伤口", "脱水", "寄生虫"].map((label, index) => ({
+    id: `signal-${index}`,
+    category: index === 0 ? "injury" as const : "hydration" as const,
+    severity: index === 0 ? "critical" as const : "warning" as const,
+    icon: "!",
+    label,
+    consequence: "继续活动会让状态恶化。",
+    actionLabel: "展开后处理",
+    value: 10,
+    startedTick: index,
+    updatedTick: index + 1,
+  }));
+  const markup = renderToStaticMarkup(createElement(PlayerStateFeedback, {
+    signals,
+    incidents: [],
+  }));
+
+  assert.match(markup, /状态提醒：开放伤口。点按展开详情/);
+  assert.match(markup, /class="status-signal-count">\+2/);
+  assert.equal((markup.match(/class="status-signal status-signal-/g) ?? []).length, 6);
 });
 
 test("death review makes checkpoint selection primary and keeps new run explicit", () => {

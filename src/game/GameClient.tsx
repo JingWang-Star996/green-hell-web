@@ -60,6 +60,8 @@ import {
   deriveDeathReview,
   deriveStatusSignals,
   distanceBetween,
+  getStructureDismantlePlan,
+  isDismantleableStructureKind,
   migrateGameState,
   mergeTimedDamageIncidents,
   pruneExpiredDamageIncidents,
@@ -75,6 +77,7 @@ import {
   type ItemId,
   type RecipeId,
   type StatusSignal,
+  type StructureDismantlePlan,
 } from "./sim";
 import { getCampStructureById } from "./sim/selectors";
 import {
@@ -89,6 +92,7 @@ import { TouchControls } from "./ui/TouchControls";
 import { ActionFeedbackLayer } from "./ui/ActionFeedbackLayer";
 import { DeathReview } from "./ui/DeathReview";
 import { PlayerStateFeedback } from "./ui/PlayerStateFeedback";
+import { DismantleConfirmation } from "./ui/DismantleConfirmation";
 import {
   nextActivePanel,
   normalizeMenuShortcutCode,
@@ -384,6 +388,8 @@ export default function GameClient() {
   const playerFrameRef = useRef<PlayerFrame | null>(null);
   const commandRef = useRef<(command: GameCommand) => GameState | null>(() => null);
   const interactionRef = useRef<(target: InteractionTarget) => void>(() => undefined);
+  const targetRef = useRef<InteractionTarget | null>(null);
+  const pendingDismantleIdRef = useRef<string | null>(null);
   const placementRecipeRef = useRef<RecipeId | null>(null);
   const lastEventIdRef = useRef(0);
   const damageIncidentCursorRef = useRef(0);
@@ -437,6 +443,7 @@ export default function GameClient() {
   const [placementRecipe, setPlacementRecipe] = useState<RecipeId | null>(null);
   const [actionReceipts, setActionReceipts] = useState<ActionReceipt[]>([]);
   const [actionPhase, setActionPhase] = useState<ActionPhase | null>(null);
+  const [pendingDismantleId, setPendingDismantleId] = useState<string | null>(null);
   const [localSaveDurability, setLocalSaveDurability] =
     useState<KVStorageDurability>("persistent");
   const [hasPreImportSave, setHasPreImportSave] = useState(false);
@@ -514,7 +521,21 @@ export default function GameClient() {
   }, [damageIncidents]);
 
   const view = useMemo(() => gameState ? createGameViewModel(gameState, retainedRecipes) : null, [gameState, retainedRecipes]);
+  const targetDismantlePlan = useMemo<StructureDismantlePlan | null>(() => {
+    if (!gameState || !target || !isDismantleableStructureKind(target.kind)) {
+      return null;
+    }
+    return getStructureDismantlePlan(gameState, target.id);
+  }, [gameState, target]);
+  const pendingDismantlePlan = useMemo<StructureDismantlePlan | null>(() => {
+    if (!gameState || !pendingDismantleId) return null;
+    return getStructureDismantlePlan(gameState, pendingDismantleId);
+  }, [gameState, pendingDismantleId]);
   const gameStatus = gameState?.status ?? null;
+
+  useEffect(() => {
+    targetRef.current = target;
+  }, [target]);
 
   const commitState = useCallback((next: GameState) => {
     stateRef.current = next;
@@ -752,6 +773,48 @@ export default function GameClient() {
     else rendererRef.current?.releasePointerLock();
   }, []);
 
+  const closeDismantleConfirmation = useCallback(() => {
+    pendingDismantleIdRef.current = null;
+    setPendingDismantleId(null);
+    const playing = stateRef.current?.status === "playing";
+    const paused = Boolean(activePanelRef.current) || !playing;
+    rendererRef.current?.setPaused(paused);
+    if (paused) rendererRef.current?.releasePointerLock();
+    else rendererRef.current?.requestPointerLock();
+  }, []);
+
+  const requestDismantleConfirmation = useCallback((structureId: string) => {
+    let state = stateRef.current;
+    if (!state || state.status !== "playing" || restCheckpointBarrierRef.current) return;
+    const frame = playerFrameRef.current;
+    if (frame) {
+      state = synchronizeInteractionPlayerFrame(state, frame);
+      commitState(state);
+    }
+    const plan = getStructureDismantlePlan(state, structureId);
+    if (!plan.ok) {
+      showInteractionCaption(plan.message);
+      return;
+    }
+    pendingDismantleIdRef.current = structureId;
+    setPendingDismantleId(structureId);
+    rendererRef.current?.setPaused(true);
+    rendererRef.current?.releasePointerLock();
+  }, [commitState, showInteractionCaption]);
+
+  const confirmDismantle = useCallback(() => {
+    const structureId = pendingDismantleIdRef.current;
+    let state = stateRef.current;
+    if (!structureId || !state) return;
+    const frame = playerFrameRef.current;
+    if (frame) {
+      state = synchronizeInteractionPlayerFrame(state, frame);
+      commitState(state);
+    }
+    commandRef.current({ type: "dismantle-structure", structureId });
+    closeDismantleConfirmation();
+  }, [closeDismantleConfirmation, commitState]);
+
   const handleInteraction = useCallback((interaction: InteractionTarget) => {
     let state = stateRef.current;
     if (!state) return;
@@ -905,7 +968,16 @@ export default function GameClient() {
     };
   }, []);
 
-  const startState = useCallback((state: GameState, eventId: string) => {
+  const startState = useCallback((incomingState: GameState, eventId: string) => {
+    const mergedKnowledge = mergeRetainedRecipeKnowledge(
+      incomingState,
+      retainedRecipes,
+    );
+    const state = mergedKnowledge.state;
+    if (!sameRecipeList(retainedRecipes, mergedKnowledge.retainedRecipeIds)) {
+      writeRetainedRecipes(mergedKnowledge.retainedRecipeIds);
+      setRetainedRecipes(mergedKnowledge.retainedRecipeIds);
+    }
     stateRef.current = state;
     lastEventIdRef.current = state.eventLog.at(-1)?.id ?? 0;
     damageIncidentCursorRef.current = lastEventIdRef.current;
@@ -920,6 +992,8 @@ export default function GameClient() {
     checkpointedEventIdsRef.current.clear();
     setActionReceipts([]);
     setActionPhase(null);
+    pendingDismantleIdRef.current = null;
+    setPendingDismantleId(null);
     pendingCheckpointRecoveryRef.current = null;
     setCheckpointPickerOpen(false);
     setCheckpointRecoveryState({ phase: "idle" });
@@ -938,6 +1012,7 @@ export default function GameClient() {
     playerFrameRef.current = null;
     stepDistanceRef.current = 0;
     setTarget(null);
+    targetRef.current = null;
     setCompatibilityError(null);
     placementRecipeRef.current = null;
     setPlacementRecipe(null);
@@ -957,7 +1032,7 @@ export default function GameClient() {
     audioRef.current.setEnabled(audioEnabled);
     void audioRef.current.unlock();
     void toyRef.current?.reportAction(eventId);
-  }, [audioEnabled]);
+  }, [audioEnabled, retainedRecipes]);
 
   const startNewGame = useCallback(() => {
     loadGenerationRef.current += 1;
@@ -1020,7 +1095,10 @@ export default function GameClient() {
       if (disposed || !stateRef.current) return;
       try {
         renderer = new RainforestRenderer(canvas, {
-          onTargetChange: setTarget,
+          onTargetChange: (nextTarget) => {
+            targetRef.current = nextTarget;
+            setTarget(nextTarget);
+          },
           onActionPhaseChange: setActionPhase,
           onInteract: (interaction) => interactionRef.current(interaction),
           onPlayerFrame: (frame) => {
@@ -1217,7 +1295,7 @@ export default function GameClient() {
     if (screen !== "game") return;
     const interval = window.setInterval(() => {
       const current = stateRef.current;
-      if (!current || current.status !== "playing" || restCheckpointBarrierRef.current || !rendererReadyRef.current || !enteredGameRef.current || activePanelRef.current !== null || document.hidden) return;
+      if (!current || current.status !== "playing" || restCheckpointBarrierRef.current || pendingDismantleIdRef.current || !rendererReadyRef.current || !enteredGameRef.current || activePanelRef.current !== null || document.hidden) return;
       const frame = playerFrameRef.current;
       const movement = frame ? {
         x: frame.x - current.player.position.x,
@@ -1321,6 +1399,13 @@ export default function GameClient() {
   useEffect(() => {
     if (screen !== "game") return;
     const onKeyDown = (event: KeyboardEvent) => {
+      if (pendingDismantleIdRef.current) {
+        if (event.code === "Escape") {
+          event.preventDefault();
+          closeDismantleConfirmation();
+        }
+        return;
+      }
       const currentPanel = activePanelRef.current;
       const placementActive = Boolean(rendererRef.current?.isPlacementActive());
       const menuAction = resolveMenuKeyAction({
@@ -1362,6 +1447,14 @@ export default function GameClient() {
         }
         return;
       }
+      if (event.code === "KeyR" && !event.repeat) {
+        const focused = targetRef.current;
+        if (focused && isDismantleableStructureKind(focused.kind)) {
+          event.preventDefault();
+          requestDismantleConfirmation(focused.id);
+          return;
+        }
+      }
       const equipmentByCode: Partial<Record<string, EquippableItemId | null>> = {
         Digit1: "axe",
         Digit2: "spear",
@@ -1378,7 +1471,14 @@ export default function GameClient() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [screen, closePanel, dispatchCommand, openPanel]);
+  }, [
+    screen,
+    closeDismantleConfirmation,
+    closePanel,
+    dispatchCommand,
+    openPanel,
+    requestDismantleConfirmation,
+  ]);
 
   useEffect(() => () => {
     if (hazardCaptionTimerRef.current !== null) window.clearTimeout(hazardCaptionTimerRef.current);
@@ -1843,6 +1943,12 @@ export default function GameClient() {
         }}
         onOpenWatch={() => openPanel("watch")}
         onOpenBody={() => openPanel("body")}
+        onOpenNotebook={() => openPanel("notebook")}
+        dismantleAction={targetDismantlePlan ? {
+          available: targetDismantlePlan.ok,
+          detail: targetDismantlePlan.message,
+          onRequest: () => requestDismantleConfirmation(targetDismantlePlan.structureId),
+        } : undefined}
       />
       {!resolution && (
         <PlayerStateFeedback
@@ -1901,6 +2007,7 @@ export default function GameClient() {
         recommendedCheckpointSlotId={recommendedCheckpointSlotId}
         manualCheckpointSlot={manualCheckpointSlot}
         onClose={closePanel}
+        onOpenPanel={openPanel}
         onCraft={handleCraft}
         onItemAction={handleItemAction}
         onTreatWound={() => dispatchCommand({ type: "use-item", itemId: "bandage" })}
@@ -1925,7 +2032,7 @@ export default function GameClient() {
         onUiScaleChange={changeUiScale}
       />
       <TouchControls
-        visible={rendererReady && !activePanel && !resolution && restCheckpointBarrier.phase !== "saving"}
+        visible={rendererReady && !activePanel && !resolution && !pendingDismantleId && restCheckpointBarrier.phase !== "saving"}
         onInput={(input: Partial<TouchInput>) => {
           if (!rendererReadyRef.current || restCheckpointBarrierRef.current) return;
           enteredGameRef.current = true;
@@ -1956,7 +2063,21 @@ export default function GameClient() {
         equipped={gameState.player.equippedItem ?? null}
         onEquip={(itemId) => dispatchCommand({ type: "equip-item", itemId })}
         onOpenPanel={openPanel}
+        secondaryAction={targetDismantlePlan ? {
+          label: "拆除",
+          target: targetDismantlePlan.label,
+          detail: targetDismantlePlan.message,
+          blocked: !targetDismantlePlan.ok,
+          onTrigger: () => requestDismantleConfirmation(targetDismantlePlan.structureId),
+        } : undefined}
       />
+      {pendingDismantlePlan && (
+        <DismantleConfirmation
+          plan={pendingDismantlePlan}
+          onConfirm={confirmDismantle}
+          onCancel={closeDismantleConfirmation}
+        />
+      )}
       {compatibilityError && <CompatibilityError message={compatibilityError} onRestart={() => setScreen("menu")} />}
       {resolution && activePanel !== "notebook" && (
         <ResolutionScreen
@@ -2514,6 +2635,43 @@ function writeRetainedRecipes(recipes: readonly RecipeId[]): void {
   } catch {
     // Knowledge still remains available for the current session.
   }
+}
+
+export function mergeRetainedRecipeKnowledge(
+  state: GameState,
+  deviceRecipes: readonly RecipeId[],
+): { state: GameState; retainedRecipeIds: RecipeId[] } {
+  const retainedRecipeIds = RECIPE_IDS.filter(
+    (recipeId) =>
+      recipeId === "stone-blade" ||
+      deviceRecipes.includes(recipeId) ||
+      state.knowledge?.announcedRecipeIds.includes(recipeId) ||
+      state.knowledge?.craftedRecipeIds.includes(recipeId),
+  );
+  const knowledge = state.knowledge ?? {
+    inspectedLandmarkIds: [],
+    observedItemIds: [],
+    craftedRecipeIds: [],
+    announcedRecipeIds: [],
+    objectiveFacts: [],
+  };
+  return {
+    state: {
+      ...state,
+      knowledge: {
+        ...knowledge,
+        announcedRecipeIds: retainedRecipeIds,
+      },
+    },
+    retainedRecipeIds,
+  };
+}
+
+function sameRecipeList(
+  left: readonly RecipeId[],
+  right: readonly RecipeId[],
+): boolean {
+  return left.length === right.length && left.every((id, index) => id === right[index]);
 }
 
 function normalizeDegrees(value: number): number {

@@ -41,6 +41,14 @@ type TouchControlsProps = {
   equipped: HeldItemKind;
   onEquip: (itemId: HeldItemKind) => void;
   onOpenPanel: (panel: PanelId) => void;
+  secondaryAction?: {
+    label: string;
+    target?: string;
+    detail: string;
+    /** A blocked action stays tappable so touch players can request its remedy. */
+    blocked?: boolean;
+    onTrigger: () => void;
+  };
 };
 
 export function TouchControls({
@@ -59,6 +67,7 @@ export function TouchControls({
   equipped,
   onEquip,
   onOpenPanel,
+  secondaryAction,
 }: TouchControlsProps) {
   const movePointer = useRef<number | null>(null);
   const moveOrigin = useRef({ x: 0, y: 0 });
@@ -236,7 +245,6 @@ export function TouchControls({
       )}
       {!placementActive &&
         !actionPhase &&
-        (interactionMode === "movement" || interactionMode === "unavailable") &&
         actionDetail && (
           <div className="touch-action-explanation" role="status">
             <strong>{presentedActionLabel}</strong>
@@ -248,6 +256,21 @@ export function TouchControls({
           <button onClick={onRotatePlacement}>旋转</button>
           <button onClick={onCancelPlacement}>取消</button>
         </div>
+      )}
+      {!placementActive && !actionPhase && secondaryAction && (
+        <button
+          type="button"
+          className={`touch-secondary-action${secondaryAction.blocked ? " is-blocked" : ""}`}
+          onClick={secondaryAction.onTrigger}
+          aria-disabled={secondaryAction.blocked ? "true" : undefined}
+          aria-label={`${secondaryAction.blocked ? "暂不可拆" : secondaryAction.label}${secondaryAction.target ? `：${secondaryAction.target}` : ""}${secondaryAction.blocked ? `；${secondaryAction.detail}` : ""}`}
+          title={secondaryAction.detail}
+        >
+          <strong>{secondaryAction.blocked ? "暂不可拆" : secondaryAction.label}</strong>
+          {(secondaryAction.blocked || secondaryAction.target) && (
+            <small>{secondaryAction.blocked ? secondaryAction.detail : secondaryAction.target}</small>
+          )}
+        </button>
       )}
       <button
         className="touch-sprint"

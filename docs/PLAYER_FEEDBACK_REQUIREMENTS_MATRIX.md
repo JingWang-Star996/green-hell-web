@@ -1,6 +1,6 @@
 # CANOPY 玩家反馈与需求追踪矩阵
 
-> 最后更新：2026-07-15
+> 最后更新：2026-07-16
 > 范围：本 Codex 任务中用户截至本次更新提出的全部产品、玩法、交互、视觉、存档与发布反馈。
 > 用途：这是“用户反馈是否被处理”的唯一追踪账本；它不替代 `PROJECT_BRIEF.md`、系统规格、测试报告或发布记录。
 
@@ -78,6 +78,7 @@
 | HARVEST-004 | 砍树、挖石、攻击不应是按键后立即判定 | 动作需具备可中断 windup、命中窗和 recovery，由相机前方扫掠几何权威结算 | 转身、离开范围、被遮挡或切换状态会中断；只有命中窗中的首个合法目标受影响 | **完成** | `src/game/render/actionTransaction.ts`、`src/game/world/hitGeometry.ts`、`tests/render/actionTransaction.test.ts`、`tests/sim/physicalHitValidation.test.ts` | 下一候选；实机调节动作节奏 |
 | HARVEST-005 | 砍树应有完整产物与世界反馈 | 一棵树需要从站立实体转为倒木、枝条、木段、原木、劈柴和树桩，而非直接加背包数字 | 砍击可见受损；倒伏后可拾枝、截段、搬原木、劈柴；状态读档保持 | **完成** | `src/game/sim/treeHarvest.ts`、`src/game/render/RainforestRenderer.ts`、`tests/sim/treeFelling.test.ts`、`tests/render/treeFellingRender.test.ts` | 审核候选 |
 | HARVEST-006 | “同形同规则”仍需要真人验证理解成本 | 自动化证明语义一致，但不能证明玩家能从轮廓预判行为 | 无解释测试者对至少 90% 抽查对象在 5 秒内说对对象、动词和阻塞原因 | **待实机验证** | `PLAYTEST_RUBRIC.md`、`docs/WORLD_OBJECT_AUDIT.md` | 实机门禁 |
+| HARVEST-007 | 砍树后玩家会被新树桩或倒木碰撞困住 | 动态碰撞变化必须允许玩家沿单调减小穿透的路径脱困，不能生成后直接封死当前胶囊 | 新碰撞出现后玩家可以向脱困方向移动，不能继续深入，也不能用一个穿透交换另一个穿透 | **完成** | `src/game/world/interactionGeometry.ts`、`tests/world/movementCollision.test.ts` | 已进入 2026-07-16 生产制品；仍需更多复杂地形真机抽查 |
 
 ## 7. 生物、生态与战斗
 
@@ -148,6 +149,8 @@
 | UI-004 | Tab/C/B/N/M/F 与 Esc 打开后不能稳定关闭、菜单互相叠 | 菜单键应同键切换、异键互斥；Esc 先取消局部状态再逐层退出；顶层恢复对话框在加载期间必须消费 Esc，不能向下传播并意外关闭游戏面板 | 所有快捷键同键关闭；异键替换当前面板；Esc 按输入焦点→顶层对话框→放置→面板→暂停顺序退层；恢复加载期间不被关闭 | **完成** | `src/game/ui/menuShortcuts.ts`、`src/game/GameClient.tsx`、`tests/ui/menuShortcuts.test.ts`、`tests/ui/saveUiIntegrationPolicies.test.ts` | 下一候选；快捷键和顶层 modal 规则已有自动化证据 |
 | UI-005 | 移动操作和桌面操作不能走两套不同规则 | 输入层只选择同一 affordance/command，阻塞原因、动作阶段和结果必须一致 | 触控按钮显示与 HUD 相同动词/目标/阻塞；动作期间显示进度并防重复输入 | **完成** | `src/game/ui/TouchControls.tsx`、`tests/ui/actionPhase.test.ts`、`tests/ui/touchControls.test.ts` | 下一候选 |
 | UI-006 | 自动化 CSS 契约不等于真机可用 | 浏览器地址栏、手势、横竖屏、触摸延迟和 GPU 性能需要设备矩阵 | 至少覆盖目标三种视口和一台真实手机，完成所有面板、装备、建造、导入与死亡读档路线 | **待实机验证** | `PLAYTEST_RUBRIC.md`、`docs/RELEASE_REPORT.md` | 实机门禁 |
+| UI-007 | 移动端“留意”长期遮挡竖屏画面 | 持续状态应使用紧凑摘要和主动展开；即时伤害、持续风险与详细说明不能占用同一常驻大卡片 | 多个持续状态折叠为一个紧凑入口；玩家可展开详情；致命即时反馈仍优先且短暂出现 | **完成** | `src/game/ui/PlayerStateFeedback.tsx`、`app/globals.css`、`tests/ui/playerStateFeedback.test.ts`、`tests/ui/mobileResponsiveContract.test.ts` | 已进入 2026-07-16 生产制品；真机遮挡感受继续观察 |
+| UI-008 | ESC 暂停界面杂乱，保存、设置、帮助和危险操作混在一起 | 暂停菜单需要按任务分区，保存时间线、设置、控制与危险操作拥有清晰层级和键盘退层 | ESC 面板分为四个可聚焦分区；移动端两列/短横屏四列自适应；关闭与危险操作不混淆 | **完成** | `src/game/ui/Panels.tsx`、`app/globals.css`、`tests/ui/pausePanel.test.ts`、`tests/ui/mobileResponsiveContract.test.ts` | 已进入 2026-07-16 生产制品；真实键鼠/触控焦点继续复测 |
 
 ## 13. 雨林群系、动态地图、地形与植物
 
@@ -187,14 +190,14 @@
 
 | ID | 用户症状 / 要求 | 系统性解释 | 可观察验收标准 | 当前状态 | 证据 | 发布处置 |
 | --- | --- | --- | --- | --- | --- | --- |
-| RELEASE-001 | Toy 生产页丢 CSS/JS、出现宿主 404，怀疑没有遵守托管规范 | Toy 包必须以 `index.html` 为位置无关入口，闭包所有本地资源，不能依赖开发服务器绝对路径 | `build:toy` 生成可搬迁闭包；静态 doctor 0 findings；预览无应用资源 404/JS error | **完成** | `scripts/prepare-toy-build.mjs`、`scripts/verify-toy-build.mjs`、`package.json`、`docs/RELEASE_REPORT.md` | 审核候选；生产 URL 仍需复测 |
-| RELEASE-002 | 要求把画面升级前版本先发布 Toy，并在开发继续时冻结候选 | 发布物与开发工作区必须分离，避免开发中改动污染审核包 | Toy ID `10228414336000` 的冻结包已提交，状态记录为 `auditing`；开发分支持续推进 | **部分** | `docs/RELEASE_REPORT.md`、`PLAYTEST_RUBRIC.md` | 等待审核；不能称已上线 |
-| RELEASE-003 | Toy 预览能开不代表正式页、Pointer Lock 和云存档正常 | 宿主权限、生产 CDN、直接刷新、OAuth/SDK 和跨设备云只能在正式 URL 验证 | 审核通过后验证首载、刷新、Pointer Lock、触控、控制台、保存/恢复和降级 | **待实机验证** | `docs/RELEASE_REPORT.md` | 生产上线强制 smoke |
+| RELEASE-001 | Toy 生产页丢 CSS/JS、出现宿主 404，怀疑没有遵守托管规范 | Toy 包必须以 `index.html` 为位置无关入口，闭包所有本地资源，不能依赖开发服务器绝对路径 | `build:toy` 生成可搬迁闭包；静态 doctor 0 findings；生产无应用资源 404/启动错误 | **完成** | `scripts/prepare-toy-build.mjs`、`scripts/verify-toy-build.mjs`、`package.json`、`docs/releases/2026-07-16.md` | 已发布；继续监控宿主 SDK 错误 |
+| RELEASE-002 | 要求把画面升级前版本先发布 Toy，并在开发继续时冻结候选 | 发布物与开发工作区必须分离，避免开发中改动污染审核包 | Toy ID `10228414336000` 返回 `published`；正式地址可进入游戏 | **完成** | `docs/releases/2026-07-16.md`、`docs/releases/2026-07-16-toy-manifest.tsv` | 已上线；当前制品未与唯一 Git SHA 绑定的风险已记录 |
+| RELEASE-003 | Toy 预览能开不代表正式页、Pointer Lock 和云存档正常 | 宿主权限、生产 CDN、直接刷新、OAuth/SDK 和跨设备云只能在正式 URL 验证 | 正式地址验证首载、恢复和 WebGL 场景；Pointer Lock 手感、触控和跨设备云仍需真机 | **部分** | `docs/releases/2026-07-16.md` | 生产首轮 smoke 已通过；真机/跨设备继续验证 |
 | RELEASE-004 | 要求最新版本更新 GitHub | 当前本地开发版本远超已提交 SHA，不能用旧仓库代表最新成果 | 整理变更、通过完整门禁、提交并推送；记录 commit/PR/Actions/Pages URL | **未做** | `docs/RELEASE_REPORT.md` 第7节；当前发布字段仍为 `PUBLISH-TIME` | 下一候选通过后执行；需外部写入授权 |
-| RELEASE-005 | 要求安装 Toy CLI、检查 `toy upgrade`、`toy whoami` 和 OAuth | 安装 skill 不等于 CLI 当前可用；历史发布命令也不等于当前登录态仍有效 | 当前执行环境能运行 `toy upgrade`；`toy whoami` 返回 UID/昵称；失效时只打开官方 OAuth 授权页 | **部分** | 历史命令记录：`docs/RELEASE_REPORT.md`；当前会话仍需重新验证 CLI/PATH 与登录态 | 每次发布前置门禁；不得用非官方页面代替授权页 |
-| RELEASE-006 | 用户要求完成后提交 Toy 审核并飞书通知 | 通知必须写真实审核状态、测试边界、预览/生产 URL 和待办，不能把审核中说成上线 | 冻结候选审核通知已发送并有回执；最终版本发布后再发一次完成通知 | **部分** | `docs/RELEASE_REPORT.md` 第7节 | 当前候选通知已完成；最终版本通知待下一次发布 |
+| RELEASE-005 | 要求安装 Toy CLI、检查 `toy upgrade`、`toy whoami` 和 OAuth | 安装 skill 不等于 CLI 当前可用；历史发布命令也不等于当前登录态仍有效 | 当前执行环境能运行 `toy upgrade`；`toy whoami` 返回 UID/昵称；失效时只打开官方 OAuth 授权页 | **完成** | `docs/releases/2026-07-16.md` | Toy CLI v0.3.0；当前身份 UID `4153976` / `上只当麻_1047008888`；每次发布仍须重新验证 |
+| RELEASE-006 | 用户要求完成后提交 Toy 审核并飞书通知 | 通知必须写真实审核状态、测试边界、预览/生产 URL 和待办，不能把审核中说成上线 | 冻结候选审核通知和最终 `published` 完成通知均已发送；完成通知包含正式地址、验收结果和未完成边界 | **完成** | `docs/RELEASE_REPORT.md` 第7节、`docs/releases/2026-07-16.md` | 2026-07-16 21:47（UTC+8）已发送至“王鲸Codex”并确认消息出现 |
 | RELEASE-007 | Toy 包体上限 140MB，不应浪费空间 | 新资产和程序化表现都要记录包体增量和许可证 | 构建包低于140MB；doctor通过；每项外部/生成资产有清单 | **完成** | `docs/RELEASE_REPORT.md`、`public/assets/licenses.json` | 每个候选重新核对 |
-| RELEASE-008 | F12 中 `pointer-lock` feature 警告与 Toy SDK 预载提示可能被误判为游戏错误 | 应区分宿主警告、应用资源错误和真正运行时崩溃；功能验收优先于“控制台绝对零文本” | 应用 CSS/JS 全部加载；Pointer Lock 实际可进入/退出；宿主警告单独记录，不掩盖应用错误 | **待实机验证** | `docs/RELEASE_REPORT.md`、Toy 生产 smoke 待办 | 审核通过后在生产 URL 复测 |
+| RELEASE-008 | F12 中 `pointer-lock` feature 警告与 Toy SDK 预载提示可能被误判为游戏错误 | 应区分宿主警告、应用资源错误和真正运行时崩溃；功能验收优先于“控制台绝对零文本” | 应用 CSS/JS 全部加载；Pointer Lock 实际可进入/退出；宿主警告单独记录，不掩盖应用错误 | **部分** | `docs/releases/2026-07-16.md` | 生产应用资源已通过；宿主 `bili-sc-sdk` 报错仍在，Pointer Lock 手感待真机 |
 
 ## 17. 当前发布门禁与后续路线的分界
 
@@ -207,7 +210,7 @@
 - UI-003 至 UI-005：UI 缩放、快捷键退层与触控同源动作。
 - LIGHT-002、UI-002、UI-006：桌面/移动实机可玩性证据。
 - RELEASE-001、RELEASE-003：重新构建 Toy 包并在审核/生产 URL 完成 smoke。
-- RELEASE-004、RELEASE-006：门禁通过后更新 GitHub，并发送与真实状态一致的飞书通知。
+- RELEASE-004：从干净、唯一 commit 重新构建并绑定 manifest 后更新 GitHub；RELEASE-006 的正式发布飞书通知已完成。
 
 ### 17.2 不得冒充本次已完成
 

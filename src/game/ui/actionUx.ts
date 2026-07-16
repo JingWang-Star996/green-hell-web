@@ -28,6 +28,12 @@ export function interactionCueFor(
 }
 
 export type CraftingSectionId = "crafting" | "camp" | "building" | "rest";
+export const CRAFTING_SECTION_IDS = [
+  "crafting",
+  "camp",
+  "building",
+  "rest",
+] as const satisfies readonly CraftingSectionId[];
 
 export type CraftingActionPolicy = {
   section: CraftingSectionId;
@@ -82,9 +88,26 @@ export function groupCraftingRecipes(recipes: readonly RecipeView[]): Array<{
     rest: [],
   };
   for (const recipe of recipes) grouped[craftingActionPolicy(recipe.id).section].push(recipe);
-  return (["crafting", "camp", "building", "rest"] as const)
+  return CRAFTING_SECTION_IDS
     .filter((id) => grouped[id].length > 0)
-    .map((id) => ({ id, recipes: grouped[id] }));
+    .map((id) => ({ id, recipes: prioritizeCraftingRecipes(grouped[id]) }));
+}
+
+/**
+ * Keep urgent gameplay verbs in the first viewport without hiding anything.
+ * Array.sort is stable in our supported runtimes, so recipes with equal
+ * priority retain the authored content order.
+ */
+export function prioritizeCraftingRecipes(
+  recipes: readonly RecipeView[],
+): RecipeView[] {
+  return [...recipes].sort((left, right) => {
+    const priority = (recipe: RecipeView) =>
+      (recipe.taskRelevant ? 4 : 0) +
+      (recipe.available ? 2 : 0) +
+      (recipe.completed ? 0 : 1);
+    return priority(right) - priority(left);
+  });
 }
 
 export function formatFuelChange(before: number, after: number): string {

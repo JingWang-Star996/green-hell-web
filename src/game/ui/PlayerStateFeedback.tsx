@@ -22,6 +22,38 @@ function relativeDirectionLabel(degrees: number): string {
   return magnitude < 110 ? "左侧" : "左后方";
 }
 
+function StatusSignalCard({
+  signal,
+  onOpenBody,
+  onOpenWatch,
+}: {
+  signal: StatusSignal;
+  onOpenBody?: () => void;
+  onOpenWatch?: () => void;
+}) {
+  const openBody = signal.category === "injury" || signal.category === "illness";
+  const onOpen = openBody ? onOpenBody : onOpenWatch;
+  return (
+    <article
+      className={`status-signal status-signal-${signal.severity}`}
+      data-severity={signal.severity}
+    >
+      <span className="state-symbol" aria-hidden="true">{signal.icon}</span>
+      <div>
+        <small>{SEVERITY_LABEL[signal.severity]}</small>
+        <strong>{signal.label}</strong>
+        <p>{signal.consequence}</p>
+        <b>{signal.actionLabel}</b>
+      </div>
+      {onOpen && (
+        <button type="button" onClick={onOpen}>
+          {openBody ? "查看身体" : "查看手表"}
+        </button>
+      )}
+    </article>
+  );
+}
+
 /** Global state feedback remains visible above ordinary panels and HUD meters. */
 export function PlayerStateFeedback({
   signals,
@@ -36,6 +68,7 @@ export function PlayerStateFeedback({
   const directionalIncident = visibleIncidents.find(
     (incident) => typeof incident.relativeDirectionDegrees === "number",
   );
+  const primarySignal = visibleSignals[0];
   if (visibleSignals.length === 0 && visibleIncidents.length === 0) return null;
 
   return (
@@ -78,31 +111,42 @@ export function PlayerStateFeedback({
         ))}
       </div>
 
+      {primarySignal && (
+        <details
+          className={`status-signal-mobile-tray status-signal-mobile-${primarySignal.severity}`}
+        >
+          <summary aria-label={`状态提醒：${primarySignal.label}。点按展开详情`}>
+            <span className="state-symbol" aria-hidden="true">{primarySignal.icon}</span>
+            <span>
+              <small>{SEVERITY_LABEL[primarySignal.severity]}</small>
+              <strong>{primarySignal.label}</strong>
+            </span>
+            {visibleSignals.length > 1 && (
+              <b className="status-signal-count">+{visibleSignals.length - 1}</b>
+            )}
+          </summary>
+          <div className="status-signal-mobile-list">
+            {visibleSignals.map((signal) => (
+              <StatusSignalCard
+                key={signal.id}
+                signal={signal}
+                onOpenBody={onOpenBody}
+                onOpenWatch={onOpenWatch}
+              />
+            ))}
+          </div>
+        </details>
+      )}
+
       <div className="status-signal-stack">
-        {visibleSignals.map((signal) => {
-          const openBody = signal.category === "injury" || signal.category === "illness";
-          const onOpen = openBody ? onOpenBody : onOpenWatch;
-          return (
-            <article
-              key={signal.id}
-              className={`status-signal status-signal-${signal.severity}`}
-              data-severity={signal.severity}
-            >
-              <span className="state-symbol" aria-hidden="true">{signal.icon}</span>
-              <div>
-                <small>{SEVERITY_LABEL[signal.severity]}</small>
-                <strong>{signal.label}</strong>
-                <p>{signal.consequence}</p>
-                <b>{signal.actionLabel}</b>
-              </div>
-              {onOpen && (
-                <button type="button" onClick={onOpen}>
-                  {openBody ? "查看身体" : "查看手表"}
-                </button>
-              )}
-            </article>
-          );
-        })}
+        {visibleSignals.map((signal) => (
+          <StatusSignalCard
+            key={signal.id}
+            signal={signal}
+            onOpenBody={onOpenBody}
+            onOpenWatch={onOpenWatch}
+          />
+        ))}
       </div>
     </aside>
   );

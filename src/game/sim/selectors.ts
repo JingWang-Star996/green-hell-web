@@ -221,7 +221,14 @@ export function hasCollectedWater(state: GameState): boolean {
 export function getDiscoveredRecipeIds(state: GameState): RecipeId[] {
   const observed = (itemId: ItemId) => hasObservedItem(state, itemId);
   const hasCuttingEdge = state.inventory["stone-blade"] > 0 || hasCrafted(state, "stone-blade");
-  const discovered = new Set<RecipeId>(["stone-blade"]);
+  // Announced recipes are durable player knowledge. Keeping them in the
+  // authoritative GameState means a Toy cloud save exposes the same recipe
+  // catalogue on desktop and mobile instead of depending on device-local
+  // storage.
+  const discovered = new Set<RecipeId>([
+    "stone-blade",
+    ...(state.knowledge?.announcedRecipeIds ?? []),
+  ]);
 
   if (observed("medicinal-leaf") && observed("vine")) discovered.add("bandage");
   if (observed("coconut")) discovered.add("coconut-shell");

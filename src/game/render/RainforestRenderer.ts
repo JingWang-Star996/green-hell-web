@@ -44,6 +44,7 @@ import {
   SURVEY_ROCK_SHELTER_LAYOUT,
   WEATHER_STATION_LAYOUT,
   authoredWorldColliders,
+  canMovePointThroughColliders,
   isPointShelteredBySurveyRockShelter,
   isPointBlocked,
   isWorldLineOfSightBlocked,
@@ -86,7 +87,6 @@ import {
   SHELTER_COVERAGE_RADIUS,
   STRUCTURE_KINDS,
   TORCH_WAYMARK_LAYOUT,
-  isPointBlockedByStructure,
   isWithinStructureRadius,
   resolveStructureTransform,
   structureTransformFromSource,
@@ -1064,13 +1064,19 @@ export class RainforestRenderer {
       this.pitch = THREE.MathUtils.clamp(this.pitch - this.touch.lookY * delta * 1.5, -1.34, 1.34);
     }
 
-    const candidate = this.player.clone().add(movement);
-    if (!this.isColliding(candidate.x, candidate.z)) this.player.copy(candidate);
-    else {
-      const slideX = new THREE.Vector3(candidate.x, 0, this.player.z);
-      const slideZ = new THREE.Vector3(this.player.x, 0, candidate.z);
-      if (!this.isColliding(slideX.x, slideX.z)) this.player.copy(slideX);
-      else if (!this.isColliding(slideZ.x, slideZ.z)) this.player.copy(slideZ);
+    if (moving) {
+      const colliders = this.playerMovementColliders();
+      const from = { x: this.player.x, z: this.player.z };
+      const candidate = this.player.clone().add(movement);
+      const canMoveTo = (point: THREE.Vector3) =>
+        canMovePointThroughColliders(colliders, from, point);
+      if (canMoveTo(candidate)) this.player.copy(candidate);
+      else {
+        const slideX = new THREE.Vector3(candidate.x, 0, this.player.z);
+        const slideZ = new THREE.Vector3(this.player.x, 0, candidate.z);
+        if (canMoveTo(slideX)) this.player.copy(slideX);
+        else if (canMoveTo(slideZ)) this.player.copy(slideZ);
+      }
     }
 
     const distance = this.player.distanceTo(this.lastPlayer);
@@ -2926,25 +2932,28 @@ export class RainforestRenderer {
     this.worldGroup.add(this.fireflies);
   }
 
-  private isColliding(x: number, z: number): boolean {
-    for (const collider of this.colliders) if (isPointBlocked(collider, x, z)) return true;
+  private playerMovementColliders(): WorldCollider[] {
+    const colliders: WorldCollider[] = [...this.colliders];
     for (const view of this.chunkViews.values()) {
-      for (const collider of view.colliders) if (isPointBlocked(collider, x, z)) return true;
+      colliders.push(...view.colliders);
     }
-    for (const collider of this.semanticInstances.getColliders()) {
-      if (isPointBlocked(collider, x, z)) return true;
-    }
+    colliders.push(...this.semanticInstances.getMovementColliders());
     for (const view of this.entityViews.values()) {
       if (
         view.definition.source === "semantic" ||
         view.definition.kind !== "tree"
       ) continue;
-      if (isPointBlocked(renderTreeCollider(view.definition), x, z)) return true;
+      const completedStump =
+        (!view.definition.available && !view.definition.treeHarvest) ||
+        view.definition.treeRegrowth?.stage === "stump";
+      if (!completedStump) {
+        colliders.push(renderTreeCollider(view.definition));
+      }
     }
     for (const structure of this.resolvedStructures()) {
-      if (isPointBlockedByStructure(structure, x, z)) return true;
+      colliders.push(...structureWorldColliders(structure));
     }
-    return false;
+    return colliders;
   }
 
   private isSheltered(x: number, z: number): boolean {

@@ -43,6 +43,26 @@ test("crafting menu is grouped by player intent instead of one flat recipe list"
   assert.deepEqual(grouped[1].recipes.map((item) => item.id), ["add-fuel", "boil-water"]);
 });
 
+test("current-task and immediately available recipes are promoted without hiding sections", () => {
+  const taskBandage = { ...recipe("bandage"), available: false, taskRelevant: true };
+  const availableAxe = recipe("axe");
+  const unavailableBlade = { ...recipe("stone-blade"), available: false };
+  const grouped = groupCraftingRecipes([
+    unavailableBlade,
+    availableAxe,
+    taskBandage,
+    recipe("add-fuel"),
+    recipe("campfire"),
+    recipe("rest"),
+  ]);
+
+  assert.deepEqual(grouped.map((group) => group.id), ["crafting", "camp", "building", "rest"]);
+  assert.deepEqual(
+    grouped[0].recipes.map((item) => item.id),
+    ["bandage", "axe", "stone-blade"],
+  );
+});
+
 test("fuel maintenance feedback states the observable before and after values", () => {
   assert.equal(formatFuelChange(42, 162), "营火燃料 42 秒 → 2 分 42 秒");
 });

@@ -229,6 +229,10 @@ test("autosave event classification covers rest, objectives, and key milestones"
   assert.equal(autosaveReasonForEvents([{ type: "wildlife-defeated" }]), "milestone");
   assert.equal(autosaveReasonForEvents([{ type: "wildlife-loot-collected" }]), "milestone");
   assert.equal(
+    autosaveReasonForEvents([{ type: "structure-dismantled" }]),
+    "milestone",
+  );
+  assert.equal(
     autosaveReasonForEvents([{ type: "craft-succeeded", details: { recipeId: "shelter" } }]),
     "milestone",
   );

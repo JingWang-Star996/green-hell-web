@@ -26,6 +26,7 @@ test("touch action exposes the resolved world verb and target", () => {
       onInteract: noop,
       actionLabel: "砍伐",
       actionTarget: "棕榈树",
+      actionDetail: "需要装备石斧；长按完成砍伐。",
       interactionMode: "execute",
       placementActive: false,
       onRotatePlacement: noop,
@@ -37,6 +38,7 @@ test("touch action exposes the resolved world verb and target", () => {
   assert.match(markup, /aria-label="砍伐：棕榈树"/);
   assert.match(markup, /<strong>砍伐<\/strong>/);
   assert.match(markup, /<small>棕榈树<\/small>/);
+  assert.match(markup, /需要装备石斧；长按完成砍伐。/);
   assert.doesNotMatch(markup, /disabled=""/);
 });
 

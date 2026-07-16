@@ -115,6 +115,10 @@ import {
   rainCollectorHasOverheadCoverAtPoint,
 } from "./rainCollectorRules";
 import {
+  formatStructureRefund,
+  getStructureDismantlePlan,
+} from "./structureDismantle";
+import {
   resolveSmokingRackEnvironment,
   SMOKING_RACK_REQUIRED_PROGRESS_SECONDS,
 } from "./smokingRackRules";
@@ -1592,6 +1596,77 @@ function handleUseStructure(
     },
   });
   announceRecipeDiscoveries(state);
+}
+
+function handleDismantleStructure(
+  state: GameState,
+  command: Extract<GameCommand, { type: "dismantle-structure" }>,
+): void {
+  const preflight = getStructureDismantlePlan(state, command.structureId);
+  if (!preflight.ok) {
+    rejectCommand(state, command, preflight.message, {
+      structureId: command.structureId,
+      blocker: preflight.blocker ?? "unknown",
+    });
+    return;
+  }
+
+  advanceWorkTime(state, preflight.workSeconds);
+  if (state.status !== "playing") return;
+
+  const settlement = getStructureDismantlePlan(state, command.structureId);
+  if (!settlement.ok || settlement.kind !== preflight.kind) {
+    rejectCommand(
+      state,
+      command,
+      settlement.ok
+        ? "拆除期间目标已经改变；建筑与材料都保持原样。"
+        : settlement.message,
+      {
+        structureId: command.structureId,
+        blocker: settlement.blocker ?? "target-changed",
+        interrupted: true,
+      },
+    );
+    return;
+  }
+
+  const structures = state.camp.structures ?? [];
+  const structureIndex = structures.findIndex(
+    (structure) => structure.id === command.structureId,
+  );
+  if (structureIndex < 0) {
+    rejectCommand(
+      state,
+      command,
+      "拆除结算时目标已经消失；没有返还材料。",
+      {
+        structureId: command.structureId,
+        interrupted: true,
+      },
+    );
+    return;
+  }
+
+  structures.splice(structureIndex, 1);
+  for (const [itemId, amount] of Object.entries(settlement.refund) as Array<
+    [ItemId, number]
+  >) {
+    addInventory(state, itemId, amount);
+  }
+  appendEvent(state, {
+    type: "structure-dismantled",
+    message: `已拆除${settlement.label}，返还 ${formatStructureRefund(settlement.refund)}。`,
+    cause: { source: "command", code: `dismantle:${settlement.kind}` },
+    details: {
+      structureId: command.structureId,
+      kind: settlement.kind!,
+      refundStick: settlement.refund.stick ?? 0,
+      refundVine: settlement.refund.vine ?? 0,
+      refundBroadLeaf: settlement.refund["broad-leaf"] ?? 0,
+      refundCoconutShell: settlement.refund["coconut-shell"] ?? 0,
+    },
+  });
 }
 
 function updateSmokingRacks(state: GameState): void {
@@ -4556,6 +4631,9 @@ function applyCommandMutable(state: GameState, command: GameCommand): void {
       break;
     case "use-structure":
       handleUseStructure(state, command);
+      break;
+    case "dismantle-structure":
+      handleDismantleStructure(state, command);
       break;
     case "rest":
       handleRest(state, command);

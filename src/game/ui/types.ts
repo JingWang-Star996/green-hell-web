@@ -99,6 +99,8 @@ export type RecipeView = {
   completed?: boolean;
   statusLabel?: string;
   statusValue?: number;
+  /** The active objective explicitly recommends this recipe. */
+  taskRelevant?: boolean;
 };
 
 export type EventView = {

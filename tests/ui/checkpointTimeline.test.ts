@@ -96,7 +96,10 @@ test("death recovery and rest barrier contracts remain visible in the client", (
   assert.match(coordinatorSource, /publishCheckpointCloudCompletion/);
   assert.match(source, /activePanelRef\.current = null;\s*setActivePanel\(null\);\s*finishBarrier/);
   assert.match(source, /const openPanel = useCallback\(\(panel: PanelId\) => \{\s*if \(restCheckpointBarrierRef\.current\) return;/);
-  assert.match(source, /visible=\{rendererReady && !activePanel && !resolution && restCheckpointBarrier\.phase !== "saving"\}/);
+  assert.match(
+    source,
+    /visible=\{rendererReady && !activePanel && !resolution && !pendingDismantleId && restCheckpointBarrier\.phase !== "saving"\}/,
+  );
   assert.match(source, /if \(!rendererReadyRef\.current \|\| restCheckpointBarrierRef\.current\) return;/);
   assert.match(source, /当前游戏状态不会改变/);
   assert.match(css, /\.checkpoint-recovery-card\s*\{[^}]*max-height:\s*min\(92dvh/);

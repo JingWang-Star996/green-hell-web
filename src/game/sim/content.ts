@@ -386,6 +386,7 @@ export const TASKS: Record<TaskId, TaskDefinition> = {
     label: "先止住血",
     description: "检查伤口，观察坠落点附近能黏合、捆扎的植物。",
     flag: "woundTreated",
+    supportRecipeIds: ["bandage"],
   },
   "purify-water": {
     id: "purify-water",

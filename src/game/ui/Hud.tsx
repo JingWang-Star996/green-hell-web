@@ -18,6 +18,12 @@ type HudProps = {
   onFocusGame: () => void;
   onOpenWatch: () => void;
   onOpenBody: () => void;
+  onOpenNotebook?: () => void;
+  dismantleAction?: {
+    available: boolean;
+    detail: string;
+    onRequest: () => void;
+  };
 };
 
 export function Hud({
@@ -34,6 +40,8 @@ export function Hud({
   onFocusGame,
   onOpenWatch,
   onOpenBody,
+  onOpenNotebook,
+  dismantleAction,
 }: HudProps) {
   const cardinal = getCardinal(compassDegrees);
   const interactionCue = target
@@ -58,14 +66,19 @@ export function Hud({
       </header>
 
       {objective && (
-        <section className="objective-card" aria-label="当前目标">
+        <button
+          type="button"
+          className="objective-card"
+          aria-label={`当前目标：${objective.label}。打开生存笔记查看完整说明`}
+          onClick={onOpenNotebook}
+        >
           <span className="objective-index">{objective.completed ? "✓" : "当前"}</span>
           <div>
             <small>{objective.progressLabel ?? "生存目标"}</small>
             <strong>{objective.label}</strong>
             <p>{objective.description}{objective.blocker && <><br /><b>阻断条件：{objective.blocker}</b></>}</p>
           </div>
-        </section>
+        </button>
       )}
 
       <section className="vitals-rail" aria-label="生命状态">
@@ -270,6 +283,20 @@ export function Hud({
                   ? ` · 需要${requiredItemLabel(target.affordance.requiredItem)}`
                   : ""}
               </em>
+            )}
+            {dismantleAction && (
+              <button
+                type="button"
+                className="interaction-dismantle"
+                aria-keyshortcuts="R"
+                disabled={!dismantleAction.available}
+                onClick={dismantleAction.onRequest}
+                title={dismantleAction.detail}
+              >
+                <kbd>R</kbd>
+                <span>拆除</span>
+                <small>{dismantleAction.detail}</small>
+              </button>
             )}
           </div>
         </div>

@@ -305,3 +305,43 @@ Copy this section when a consequential decision is made.
 - Tradeoff: Sparse saves need a new versioned tree-regrowth field and render/interaction projections must use the effective stage rather than the deterministic baseline morphology. The user explicitly stated that research-phase legacy saves need not be preserved; older supported compact payloads still fail closed or migrate, but current generator/state truth takes priority.
 - Consequence: Tree growth may never be represented by renderer-only scale or by changing an unrelated resource node. Saves, chunk streaming, rest fast-forward, tool requirements, affordance text and render geometry must agree on the same stage. Cutting a sapling restarts the lifecycle and cannot grant mature-tree yield.
 - Revisit when: forest succession, canopy gaps, fire ecology, planting or player-selected species require a population-level forestry model rather than per-tree recovery.
+
+## 2026-07-16 - Dynamic collision changes must preserve a physical escape path
+
+- Status: accepted
+- Decision: A world-state transition may place a collider around the player only if subsequent movement can reduce that exact collider's penetration without entering, deepening or exchanging into another obstacle. Completed tree stumps remain visible and focusable but are treated as low step-over geometry; standing and fallen trunks remain movement blockers.
+- Context: Felling a tree changed its standing circle into a fallen capsule around the current player position. Endpoint-only collision checks then rejected every attempted step, while the finished low stump continued to behave like an invisible full-height wall.
+- Options considered: Teleport the player after every tree phase; disable all fallen-tree collision; keep boolean collision and special-case one tree; expose per-collider penetration and enforce monotonic escape.
+- Tradeoff: Movement now evaluates penetration per active collider, and renderer pools must explicitly distinguish visible geometry from movement-blocking geometry. In return, dynamic trees cannot trap the player or create a generic wall-traversal exploit.
+- Consequence: Any future moving, growing, collapsing or player-built collider must use the same escape invariant or perform an explicit, tested depenetration transaction. Low remnants may remain interactable without automatically blocking locomotion.
+- Revisit when: vertical stepping, crouching or a full swept-character controller makes height-aware collision authoritative.
+
+## 2026-07-16 - Mobile persistent hazards use compact disclosure, not permanent cards
+
+- Status: accepted
+- Decision: On touch layouts, persistent state conditions collapse to one 44px summary naming the most urgent condition and the number of additional conditions. The player deliberately expands a bounded, scrollable list for consequences and actions; immediate damage impacts temporarily take visual priority. Desktop retains the full persistent stack.
+- Context: The original desktop-sized “留意” card remained open in portrait play and covered the world and controls even though its information changed slowly.
+- Options considered: Hide persistent hazards on mobile; auto-dismiss them like event toasts; keep the full cards; retain urgency through a compact disclosure control.
+- Tradeoff: One tap is required to read detailed treatment advice. In return, the condition remains discoverable without reserving a large permanent rectangle over the playfield, and multiple conditions are not silently discarded.
+- Consequence: New persistent warnings must fit the shared summary/list model and may not add their own always-open mobile overlay. Expanded lists must preserve every active condition and all actionable destinations.
+- Revisit when: a dedicated mobile status ribbon or controller/haptic channel replaces the current disclosure pattern.
+
+## 2026-07-16 - Reversible building starts with an exact atomic dismantle transaction
+
+- Status: accepted
+- Decision: The first dismantle slice applies only to concrete persisted smoke racks and rain collectors. It resolves by exact structure ID, validates proximity, payload state and full refund capacity before and after represented work time, then removes the structure and grants a version-stable per-item refund in one settlement. A confirmation card exposes refunds and rainwater loss; success creates a milestone autosave.
+- Context: Repeatable free placement made an accidental location permanent. A generic sell button would hide world distance, duplicate materials when state changed, discard active food, or let future recipe balance rewrite old refund expectations.
+- Options considered: Free instant deletion; current-recipe percentage refunds; dropping overflow on the ground; a global building list; a world-context, two-step atomic transaction with explicit first-version scope.
+- Tradeoff: Fires, beds, shelters, waymarks and the story beacon remain non-removable until their fuel, rest, coverage and legacy facades have explicit ownership rules. In return, the shipped slice cannot partially refund, delete the wrong instance or silently destroy rack contents.
+- Consequence: New removable structures require an explicit refund table, payload-loss policy, preflight and settlement validation, desktop/touch context access, success receipt and persistence test. Historical objective facts are not rolled back when infrastructure is later removed.
+- Revisit when: storage, upgrades, foundation graphs or safe removal of stateful fire/rest/route structures enter scope.
+
+## 2026-07-16 - The first dismantle slice never discards structure payload
+
+- Status: accepted; refines the same-day atomic dismantle decision
+- Decision: A smoking rack can be dismantled only when it has no active, ready or spoiled batch; a rain collector can be dismantled only when its stored amount is zero. Both conditions are checked before represented work and again at settlement. The confirmation card describes only the version-stable material refund because this slice has no accepted payload-loss path.
+- Context: Exposing a rainwater-loss warning still made a routine relocation silently destroy a player-owned survival resource, and fractional collector state made a generic “spill the rest” rule hard to explain consistently.
+- Options considered: Allow confirmed water loss; convert remaining water into inventory regardless of containers; drop a new world pickup; require the first supported structures to be empty.
+- Tradeoff: A player may need to finish or clear a rack and fully empty a collector before relocation. In return, dismantling cannot erase food or water, bypass container capacity, or invent an unimplemented ground-drop system.
+- Consequence: Player copy, Wiki, tests and future removable structures must distinguish a blocked payload from an explicitly designed loss policy. No confirmation dialog may be treated as permission for an undocumented destructive side effect.
+- Revisit when: physical storage, world drops or a deliberate drain action provides a visible, persisted destination for remaining payload.

@@ -149,6 +149,7 @@ test("one tree slot preserves every felling phase without rebuilding plant or cl
     "semantic-tree-crowns",
   ]);
   assert.equal(layer.getRecord(tree.id)?.collider?.kind, "circle");
+  assert.equal(layer.getRecord(tree.id)?.movementBlocking, true);
   assert.deepEqual(
     layer.getRecord(tree.id)?.anchor,
     treeInteractionAnchor(sourceFor(tree)),
@@ -169,6 +170,7 @@ test("one tree slot preserves every felling phase without rebuilding plant or cl
     harvest: TreeHarvestState;
     visible: readonly (typeof TREE_MESH_NAMES)[number][];
     collider: "circle" | "capsule";
+    movementBlocking: boolean;
   }> = [
     {
       harvest: {
@@ -184,6 +186,7 @@ test("one tree slot preserves every felling phase without rebuilding plant or cl
         "semantic-tree-branch-bundles",
       ],
       collider: "capsule",
+      movementBlocking: true,
     },
     {
       harvest: {
@@ -194,6 +197,7 @@ test("one tree slot preserves every felling phase without rebuilding plant or cl
       },
       visible: ["semantic-tree-trunks", "semantic-tree-stumps"],
       collider: "capsule",
+      movementBlocking: true,
     },
     {
       harvest: {
@@ -208,6 +212,7 @@ test("one tree slot preserves every felling phase without rebuilding plant or cl
         "semantic-tree-loose-logs",
       ],
       collider: "capsule",
+      movementBlocking: true,
     },
     {
       harvest: {
@@ -218,6 +223,7 @@ test("one tree slot preserves every felling phase without rebuilding plant or cl
       },
       visible: ["semantic-tree-stumps"],
       collider: "circle",
+      movementBlocking: false,
     },
   ];
 
@@ -227,6 +233,7 @@ test("one tree slot preserves every felling phase without rebuilding plant or cl
     assert.equal(record.instanceIndex, slot);
     assert.equal(record.lifecycle, "felled");
     assert.equal(record.collider?.kind, phase.collider);
+    assert.equal(record.movementBlocking, phase.movementBlocking);
     assert.deepEqual(
       record.anchor,
       treeInteractionAnchor(sourceFor(tree, phase.harvest)),

@@ -296,9 +296,9 @@ test("the objective battery never regenerates, including malformed legacy lifecy
   assert.equal(state.world.entities[entityId].regeneration, undefined);
 });
 
-test("material observation unlocks knowledge instead of exposing every recipe at spawn", () => {
+test("the opening wound objective exposes bandaging without revealing the full catalogue", () => {
   let state = createInitialState("knowledge-loop");
-  assert.deepEqual(getDiscoveredRecipeIds(state), ["stone-blade"]);
+  assert.deepEqual(getDiscoveredRecipeIds(state), ["stone-blade", "bandage"]);
 
   for (const entityId of ["resource.medicinal.camp-01", "resource.vine.camp-01"]) {
     state = applyCommand(state, { type: "move-player", position: state.world.entities[entityId].position });
@@ -306,7 +306,7 @@ test("material observation unlocks knowledge instead of exposing every recipe at
   }
 
   assert.ok(getDiscoveredRecipeIds(state).includes("bandage"));
-  assert.ok(state.eventLog.some((event) => event.type === "recipe-discovered" && event.details?.recipeId === "bandage"));
+  assert.ok(state.knowledge?.announcedRecipeIds.includes("bandage"));
   assert.equal(getDiscoveredRecipeIds(state).includes("radio-beacon"), false);
 });
 

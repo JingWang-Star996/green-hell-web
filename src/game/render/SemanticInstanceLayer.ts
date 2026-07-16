@@ -65,6 +65,7 @@ export type SemanticInstanceRecord = {
   focusPolicy: "capability" | "never-focus";
   anchor: Readonly<{ x: number; z: number; height: number }>;
   collider?: WorldCollider;
+  movementBlocking?: boolean;
 };
 
 export type SemanticInstanceLayerOptions = {
@@ -298,6 +299,19 @@ export class SemanticInstanceLayer {
   getColliders(excludingId?: string): WorldCollider[] {
     const result: WorldCollider[] = [
       ...this.treePool.getColliders(excludingId),
+      ...this.rockPool.getColliders(excludingId),
+    ];
+    for (const chunk of this.chunks.values()) {
+      for (const entry of chunk.colliders) {
+        if (entry.id !== excludingId) result.push({ ...entry.collider });
+      }
+    }
+    return result;
+  }
+
+  getMovementColliders(excludingId?: string): WorldCollider[] {
+    const result: WorldCollider[] = [
+      ...this.treePool.getMovementColliders(excludingId),
       ...this.rockPool.getColliders(excludingId),
     ];
     for (const chunk of this.chunks.values()) {

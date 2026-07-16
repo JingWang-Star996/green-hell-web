@@ -735,6 +735,11 @@ function workTimeRecipeRequirement(workSeconds: number): RecipeRequirementView {
 
 function createRecipeViews(state: GameState, retainedRecipes: readonly RecipeId[]): RecipeView[] {
   const known = new Set<RecipeId>([...getDiscoveredRecipeIds(state), ...retainedRecipes]);
+  const taskRecipes = new Set<RecipeId>(
+    state.objectives.currentTaskId
+      ? TASKS[state.objectives.currentTaskId].supportRecipeIds ?? []
+      : [],
+  );
   const recipes: RecipeView[] = (Object.entries(RECIPES) as [RecipeId, (typeof RECIPES)[RecipeId]][]).filter(([id]) => known.has(id)).map(([id, recipe]) => {
     const check = canCraft(state, id);
     const requirements: RecipeRequirementView[] = [
@@ -809,7 +814,17 @@ function createRecipeViews(state: GameState, retainedRecipes: readonly RecipeId[
     ];
     const reason = check.reason === "not-at-camp" ? "需回到营地" : check.reason === "fire-not-lit" ? "需靠近燃烧中的营火" : check.reason === "rain-exposed" ? CAMPFIRE_RAIN_EXPOSED_GUIDANCE : check.reason === "already-built" ? "已建造" : check.reason === "missing-empty-containers" ? "需要 2 个未装水的空椰壳；建成后取水还需额外空壳" : check.reason === "inventory-full" ? "背包空间不足" : check.missingTools.length ? `需要 ${check.missingTools.map((tool) => ITEMS[tool].label).join("、")}` : "缺少材料";
     const completed = check.reason === "already-built";
-    return { id, label: recipe.label, description: RECIPE_DESCRIPTIONS[id], ingredients, requirements, available: check.ok, reason, completed };
+    return {
+      id,
+      label: recipe.label,
+      description: RECIPE_DESCRIPTIONS[id],
+      ingredients,
+      requirements,
+      available: check.ok,
+      reason,
+      completed,
+      taskRelevant: taskRecipes.has(id),
+    };
   });
   const freeContainers = getAvailableWaterContainerCount(state);
   const selectedFire = nearestPlacedStructure(state, "campfire");

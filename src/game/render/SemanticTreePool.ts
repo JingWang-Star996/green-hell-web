@@ -37,6 +37,8 @@ export type SemanticTreePoolRecord = {
   focusPolicy: "capability" | "never-focus";
   anchor: Readonly<{ x: number; z: number; height: number }>;
   collider: WorldCollider;
+  /** Stumps remain visible/focusable but are low enough to step across. */
+  movementBlocking: boolean;
 };
 
 export type SemanticTreePoolDiagnostics = {
@@ -205,6 +207,15 @@ export class SemanticTreePool {
     const result: WorldCollider[] = [];
     for (const record of this.records.values()) {
       if (record.id === excludingId) continue;
+      result.push({ ...record.collider });
+    }
+    return result;
+  }
+
+  getMovementColliders(excludingId?: string): WorldCollider[] {
+    const result: WorldCollider[] = [];
+    for (const record of this.records.values()) {
+      if (record.id === excludingId || !record.movementBlocking) continue;
       result.push({ ...record.collider });
     }
     return result;
@@ -518,6 +529,7 @@ export class SemanticTreePool {
       focusPolicy: object.focusPolicy,
       anchor: { ...anchor },
       collider,
+      movementBlocking: standing || hasFallenBody,
       bindings: [
         { mesh: this.trunks, index: slot, baseColor: trunkColor },
         { mesh: this.crowns, index: slot, baseColor: crownColor },
@@ -610,6 +622,7 @@ function copyRecord(record: SemanticTreePoolRecord): SemanticTreePoolRecord {
     focusPolicy: record.focusPolicy,
     anchor: { ...record.anchor },
     collider: { ...record.collider },
+    movementBlocking: record.movementBlocking,
   };
 }
 

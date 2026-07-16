@@ -269,6 +269,18 @@ export type {
   StructureTransform2D,
   StructureTransformSource,
 } from "./structureGeometry";
+export {
+  STRUCTURE_DISMANTLE_RULES,
+  formatStructureRefund,
+  getStructureDismantlePlan,
+  isDismantleableStructureKind,
+  structureDismantleLabel,
+} from "./structureDismantle";
+export type {
+  DismantleableStructureKind,
+  StructureDismantleBlocker,
+  StructureDismantlePlan,
+} from "./structureDismantle";
 export type {
   SimulationDurableToolView,
   SimulationPerishableView,

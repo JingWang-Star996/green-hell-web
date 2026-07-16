@@ -1,6 +1,6 @@
 # CANOPY: First Night — Project Brief
 
-Last updated: 2026-07-15
+Last updated: 2026-07-16
 
 This file is the current delivery contract. Keep it short and revise it when the milestone changes.
 
@@ -10,7 +10,7 @@ This file is the current delivery contract. Keep it short and revise it when the
 - Engine or stack: Web / Three.js + React + deterministic TypeScript simulation
 - Target platform: desktop and mobile browsers, packaged for Bilibili Toy; each platform may use a different information hierarchy but must expose the same game verbs.
 - Input method: keyboard/mouse first-person controls and a first-class touch path with complete panel/equipment access.
-- Timebox or deadline: “玩家反馈闭环 RC + 树木再生纵切”里程碑；无固定日历截止时间。
+- Timebox or deadline: 日更维护；当前为“前哨迁营 v1 + 开始页发布账本”纵切。
 - Runnable entry point: `npm run dev`, then the local root route.
 
 ## Player experience hypothesis
@@ -31,11 +31,11 @@ For maintenance work, replace this with the expected behavior, reproduction cond
 
 ## Current milestone
 
-- Outcome: close the latest player-reported release blockers on one auditable candidate, then add one visible living-rainforest consequence: ordinary felled trees recover slowly through stump, sapling, young and mature stages.
-- Smallest playable change: local save success remains durable and immediately exportable even when Toy cloud fails; dry leaves and starter materials are readable and redundant; the same system key closes its panel; missing construction materials are visibly red and explain where they come from; ordinary trees remain stumps for days before visibly regrowing through deterministic stages.
-- Must have: complete touch navigation; portable local saves plus honest Toy cloud status; three manual and ten automatic recovery points; same-key/Escape menu hierarchy; readable owned/required material rows; ecology-bounded off-screen resource scheduling; guaranteed but world-grounded starter tinder/stone/vine; deterministic staged ordinary-tree regrowth that survives rest, streaming and save/load; desktop/mobile browser smoke; clean Toy package and preview.
-- Nice to have: additional Director telemetry, structure dismantling, richer ecology behaviors, biome-specific material variants, and broader visual composition polish that does not alter the current world identity.
-- Explicit non-goals for this release candidate: claiming the full Left 4 Dead-style resource/threat Director, A3–A5 or a human-verified three-hour chapter, the final Valheim-inspired terrain/material/lighting/composition pass, the complete ecology chain, demolition/storage/rope/high-platform building network, multiplayer, engine migration, the complete ten-hour catalogue, or copying reference-game assets, maps, text, balance, story, or distinctive expression. These remain tracked requirements, not silently dropped scope.
+- Outcome: make daily updates player-readable, close the first reversible-building gap, and preserve the current living-rainforest/save/mobile foundations.
+- Smallest playable change: the title screen owns an append-only release ledger and official player-Wiki link; a player can inspect, confirm and dismantle an empty smoking rack or rain collector, receive a version-stable partial refund, and recover from the immediately written milestone save.
+- Must have: desktop R and touch context actions; explicit partial-refund confirmation; no silent loss of rack contents or collected rainwater; exact-ID atomic settlement; busy-rack, non-empty collector, distance, capacity and death rejection; structure disappearance in render/collision on the next projection; local-first milestone autosave; Wiki documentation; desktop/mobile browser smoke; clean Toy package.
+- Nice to have: additional Director telemetry, richer ecology behaviors, biome-specific material variants, and broader visual composition polish that does not alter the current world identity.
+- Explicit non-goals for this release candidate: dismantling fires, beds, shelters, torch waymarks or the story beacon; upgrades, storage, rope/high-platform networks; claiming the full Left 4 Dead-style resource/threat Director; A3–A5 or a human-verified three-hour chapter; the final Valheim-inspired terrain/material/lighting/composition pass; the complete ecology chain; multiplayer; engine migration; or copying reference-game assets, maps, text, balance, story or distinctive expression.
 
 ## Riskiest assumption
 

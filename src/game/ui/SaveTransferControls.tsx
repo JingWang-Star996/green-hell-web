@@ -93,6 +93,8 @@ export function SaveTransferControls({
           ref={fileInputRef}
           className="sr-only"
           type="file"
+          tabIndex={-1}
+          aria-hidden="true"
           accept=".canopy-save.json,.json,application/json"
           onChange={onFileChange}
         />

@@ -14,8 +14,10 @@ import {
 import { UI_SCALE_MAX, UI_SCALE_MIN, UI_SCALE_STEP } from "./uiSettings";
 import {
   CRAFTING_SECTION_LABELS,
+  CRAFTING_SECTION_IDS,
   craftingActionPolicy,
   groupCraftingRecipes,
+  type CraftingSectionId,
 } from "./actionUx";
 import {
   createInventoryFilterOptions,
@@ -25,6 +27,7 @@ import {
   isUrgentInventoryItem,
   type InventoryFilterId,
 } from "./inventoryOrganization";
+import { PANEL_IDS } from "./types";
 import type {
   BodyView,
   EventView,
@@ -61,6 +64,7 @@ type PanelsProps = {
   recommendedCheckpointSlotId?: CheckpointSlotId | null;
   manualCheckpointSlot?: ManualCheckpointSlotId | null;
   onClose: () => void;
+  onOpenPanel?: (panel: PanelId) => void;
   onCraft: (recipeId: string) => boolean;
   onItemAction: (item: InventoryItemView) => void;
   onTreatWound: () => void;
@@ -79,6 +83,26 @@ type PanelsProps = {
   onToggleReducedMotion: () => void;
   onUiScaleChange?: (value: number) => void;
 };
+
+const PANEL_TITLE_MAP: Record<PanelId, [string, string]> = {
+  watch: ["生物手表", "BIOMETRIC WATCH / F"],
+  inventory: ["野外背包", "FIELD PACK / TAB"],
+  crafting: ["手工制作", "CRAFTING / C"],
+  body: ["身体检查", "BODY INSPECTION / B"],
+  notebook: ["生存笔记", "FIELD NOTES / N"],
+  map: ["防水纸图", "TOPOGRAPHIC MAP / M"],
+  pause: ["远征暂停", "SESSION PAUSED / ESC"],
+};
+
+export const PANEL_FOCUSABLE_SELECTOR = [
+  "button:not([disabled])",
+  "summary",
+  "[href]",
+  "input:not([disabled]):not([type='hidden']):not([tabindex='-1'])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])",
+].join(", ");
 
 export function Panels(props: PanelsProps) {
   return (
@@ -115,7 +139,7 @@ function ActivePanel(props: PanelsProps & { active: PanelId }) {
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const frame = window.requestAnimationFrame(() => {
-      dialogRef.current?.querySelector<HTMLElement>("button:not([disabled]), summary, [href], [tabindex]:not([tabindex='-1'])")?.focus();
+      dialogRef.current?.querySelector<HTMLElement>(PANEL_FOCUSABLE_SELECTOR)?.focus();
     });
     return () => {
       window.cancelAnimationFrame(frame);
@@ -123,16 +147,7 @@ function ActivePanel(props: PanelsProps & { active: PanelId }) {
     };
   }, [props.active]);
 
-  const titleMap: Record<PanelId, [string, string]> = {
-    watch: ["生物手表", "BIOMETRIC WATCH / F"],
-    inventory: ["野外背包", "FIELD PACK / TAB"],
-    crafting: ["手工制作", "CRAFTING / C"],
-    body: ["身体检查", "BODY INSPECTION / B"],
-    notebook: ["生存笔记", "FIELD NOTES / N"],
-    map: ["防水纸图", "TOPOGRAPHIC MAP / M"],
-    pause: ["远征暂停", "SESSION PAUSED / ESC"],
-  };
-  const [title, kicker] = titleMap[props.active];
+  const [title, kicker] = PANEL_TITLE_MAP[props.active];
   return (
     <section
       ref={dialogRef}
@@ -140,7 +155,7 @@ function ActivePanel(props: PanelsProps & { active: PanelId }) {
       onMouseDown={(event) => event.stopPropagation()}
       onKeyDown={(event) => {
         if (event.key !== "Tab" || !dialogRef.current) return;
-        const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>("button:not([disabled]), summary, [href], [tabindex]:not([tabindex='-1'])"));
+        const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(PANEL_FOCUSABLE_SELECTOR));
         if (focusable.length === 0) return;
         const first = focusable[0];
         const last = focusable[focusable.length - 1];
@@ -157,6 +172,20 @@ function ActivePanel(props: PanelsProps & { active: PanelId }) {
         <div><small>{kicker}</small><h2 id="panel-title">{title}</h2></div>
         <button className="panel-close" onClick={props.onClose} aria-label="关闭面板">×</button>
       </header>
+      {props.onOpenPanel && (
+        <nav className="panel-system-nav" aria-label="切换生存系统">
+          {PANEL_IDS.map((panel) => (
+            <button
+              key={panel}
+              type="button"
+              aria-pressed={props.active === panel}
+              onClick={() => props.active === panel ? props.onClose() : props.onOpenPanel?.(panel)}
+            >
+              {PANEL_TITLE_MAP[panel][0]}
+            </button>
+          ))}
+        </nav>
+      )}
       <div className="panel-body">
         {props.active === "watch" && <WatchPanel watch={props.watch} />}
         {props.active === "inventory" && <InventoryPanel items={props.inventory} onAction={props.onItemAction} />}
@@ -385,22 +414,66 @@ function DurableToolUnits({ item }: { item: InventoryItemView }) {
 
 function CraftingPanel({ recipes, onCraft }: { recipes: RecipeView[]; onCraft: (recipe: RecipeView) => void }) {
   const groups = groupCraftingRecipes(recipes);
+  const preferredSection = preferredCraftingSection(groups);
+  const [activeSection, setActiveSection] = useState<CraftingSectionId>(preferredSection);
+  const resolvedSection = groups.some((group) => group.id === activeSection)
+    ? activeSection
+    : preferredSection;
+  const activeGroup = groups.find((group) => group.id === resolvedSection) ?? groups[0];
+  const availableCount = recipes.filter((recipe) => recipe.available && !recipe.completed).length;
   return (
     <div className="crafting-layout">
-      <div className="recipe-discovery-note"><b>{recipes.length}</b><span>条知识已写入笔记。观察材料、处理身体问题与经历危险，会揭示新的组合。</span></div>
-      {groups.map((group) => (
-        <section className={`recipe-section recipe-section-${group.id}`} key={group.id} aria-labelledby={`recipe-section-${group.id}`}>
+      <div className="recipe-discovery-note">
+        <b>{recipes.length}</b>
+        <span>条知识已写入笔记，其中 {availableCount} 项现在可执行。任务所需与可制作项目会优先显示。</span>
+      </div>
+      <nav className="recipe-section-nav" role="tablist" aria-label="制作分类">
+        {CRAFTING_SECTION_IDS.map((sectionId) => {
+          const group = groups.find((candidate) => candidate.id === sectionId);
+          return (
+            <button
+              key={sectionId}
+              type="button"
+              role="tab"
+              id={`recipe-tab-${sectionId}`}
+              aria-selected={activeGroup?.id === sectionId}
+              aria-controls={group ? `recipe-section-${sectionId}` : undefined}
+              disabled={!group}
+              onClick={() => group && setActiveSection(sectionId)}
+            >
+              <span>{CRAFTING_SECTION_LABELS[sectionId].title}</span>
+              <small>{group?.recipes.length ?? 0}</small>
+            </button>
+          );
+        })}
+      </nav>
+      {activeGroup && (
+        <section
+          className={`recipe-section recipe-section-${activeGroup.id}`}
+          id={`recipe-section-${activeGroup.id}`}
+          role="tabpanel"
+          aria-labelledby={`recipe-tab-${activeGroup.id}`}
+          data-section-id={activeGroup.id}
+        >
           <header>
-            <small>{String(group.recipes.length).padStart(2, "0")} ACTIONS</small>
-            <h3 id={`recipe-section-${group.id}`}>{CRAFTING_SECTION_LABELS[group.id].title}</h3>
-            <p>{CRAFTING_SECTION_LABELS[group.id].description}</p>
+            <small>{String(activeGroup.recipes.length).padStart(2, "0")} ACTIONS</small>
+            <h3>{CRAFTING_SECTION_LABELS[activeGroup.id].title}</h3>
+            <p>{CRAFTING_SECTION_LABELS[activeGroup.id].description}</p>
           </header>
           <div className="recipe-grid">
-            {group.recipes.map((recipe, index) => (
-              <article key={recipe.id} className={`${recipe.available ? "can-craft" : ""} ${recipe.completed ? "is-complete" : ""}`}>
+            {activeGroup.recipes.map((recipe, index) => (
+              <article
+                key={recipe.id}
+                data-recipe-id={recipe.id}
+                className={`${recipe.available ? "can-craft" : ""} ${recipe.completed ? "is-complete" : ""} ${recipe.taskRelevant ? "is-task-relevant" : ""}`}
+              >
                 <span className="recipe-number">{String(index + 1).padStart(2, "0")}</span>
                 <div>
-                  <small>{recipe.completed ? "已完成" : "已记录配方"}</small>
+                  <div className="recipe-card-flags">
+                    <small>{recipe.completed ? "已完成" : "已记录配方"}</small>
+                    {recipe.taskRelevant && <b>当前任务</b>}
+                    {recipe.available && !recipe.completed && <b>现在可做</b>}
+                  </div>
                   <h3>{recipe.label}</h3>
                   <p>{recipe.description}</p>
                   {recipe.statusLabel && <b className="recipe-status">{recipe.statusLabel}</b>}
@@ -417,9 +490,18 @@ function CraftingPanel({ recipes, onCraft }: { recipes: RecipeView[]; onCraft: (
             ))}
           </div>
         </section>
-      ))}
+      )}
     </div>
   );
+}
+
+function preferredCraftingSection(
+  groups: ReturnType<typeof groupCraftingRecipes>,
+): CraftingSectionId {
+  return groups.find((group) => group.recipes.some((recipe) => recipe.taskRelevant))?.id
+    ?? groups.find((group) => group.recipes.some((recipe) => recipe.available && !recipe.completed))?.id
+    ?? groups[0]?.id
+    ?? "crafting";
 }
 
 function RecipeRequirements({ requirements }: { requirements: RecipeRequirementView[] }) {
@@ -559,63 +641,184 @@ function MapPanel({ landmarks, chunks, coordinates, biome }: { landmarks: MapLan
   );
 }
 
+export const PAUSE_SECTION_IDS = ["overview", "saves", "settings", "session"] as const;
+type PauseSectionId = (typeof PAUSE_SECTION_IDS)[number];
+
+const PAUSE_SECTION_LABELS: Record<PauseSectionId, string> = {
+  overview: "总览",
+  saves: "存档与恢复",
+  settings: "显示与声音",
+  session: "本局管理",
+};
+
 function PausePanel({ audioEnabled, reducedMotion, uiScale, saveStatus, saveTransferState, localSaveDurability, hasPreImportSave, checkpointEntries, recommendedCheckpointSlotId, manualCheckpointSlot, onResume, onRestart, onManualSave, onSaveManualCheckpoint, onPreviewCheckpoint, onPrepareSaveExport, onSelectSaveImport, onConfirmSaveImport, onCancelSaveImport, onPreparePreImportRestore, onToggleAudio, onToggleReducedMotion, onUiScaleChange }: {
   audioEnabled: boolean; reducedMotion: boolean; uiScale: number; saveStatus: SaveStatus; saveTransferState: SaveTransferState; localSaveDurability: "persistent" | "ephemeral"; hasPreImportSave: boolean; checkpointEntries: CheckpointTimelineEntry[]; recommendedCheckpointSlotId: CheckpointSlotId | null; manualCheckpointSlot: ManualCheckpointSlotId | null; onResume: () => void; onRestart: () => void; onManualSave: () => void; onSaveManualCheckpoint: (slotId: ManualCheckpointSlotId) => void; onPreviewCheckpoint: (slotId: CheckpointSlotId) => void; onPrepareSaveExport: () => void; onSelectSaveImport: (file: File) => void; onConfirmSaveImport: () => void; onCancelSaveImport: () => void; onPreparePreImportRestore: () => void; onToggleAudio: () => void; onToggleReducedMotion: () => void; onUiScaleChange: (value: number) => void;
 }) {
+  const pauseTabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const [activeSection, setActiveSection] = useState<PauseSectionId>("overview");
   const [confirmRestart, setConfirmRestart] = useState(false);
   const savedTime = saveStatus.savedAt
     ? new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(saveStatus.savedAt)
     : null;
+  const saveCard = (
+    <div className={`pause-save-card save-phase-${saveStatus.phase}`} role="status" aria-live="polite">
+      <div>
+        <span>{saveStatusLabel(saveStatus)}</span>
+        {savedTime && <small>最近保存 {savedTime}</small>}
+      </div>
+      <button className="button-ghost" disabled={saveStatus.phase === "saving"} onClick={onManualSave}>
+        保存当前活动档
+      </button>
+    </div>
+  );
+  const selectSection = (section: PauseSectionId, moveFocus = false) => {
+    setActiveSection(section);
+    if (section !== "session") setConfirmRestart(false);
+    if (moveFocus) {
+      pauseTabRefs.current[PAUSE_SECTION_IDS.indexOf(section)]?.focus();
+    }
+  };
   return (
     <div className="pause-layout">
-      <p>时间已经停下。返回后先确认方向和当前最危险的问题。</p>
-      <button className="button-primary full-width" onClick={onResume}>返回雨林</button>
-      <div className={`pause-save-card save-phase-${saveStatus.phase}`} role="status" aria-live="polite">
-        <div><span>{saveStatusLabel(saveStatus)}</span>{savedTime && <small>最近保存 {savedTime}</small>}</div>
-        <button className="button-ghost" disabled={saveStatus.phase === "saving"} onClick={onManualSave}>保存当前活动档</button>
-      </div>
-      <CheckpointTimelinePanel
-        entries={checkpointEntries}
-        recommendedSlotId={recommendedCheckpointSlotId}
-        busyManualSlot={manualCheckpointSlot}
-        mode="manage"
-        onSaveManual={onSaveManualCheckpoint}
-        onSelect={onPreviewCheckpoint}
-      />
-      <button className="setting-row" onClick={onToggleAudio}><span>环境音与提示音</span><b>{audioEnabled ? "开启" : "关闭"}</b></button>
-      <button className="setting-row" onClick={onToggleReducedMotion}><span>减弱镜头与粒子运动</span><b>{reducedMotion ? "开启" : "关闭"}</b></button>
-      <div className="setting-range-row">
-        <div><label htmlFor="ui-scale-range">UI 控件大小</label><output htmlFor="ui-scale-range">{uiScale}%</output></div>
-        <input
-          id="ui-scale-range"
-          type="range"
-          min={UI_SCALE_MIN}
-          max={UI_SCALE_MAX}
-          step={UI_SCALE_STEP}
-          value={uiScale}
-          aria-valuetext={`${uiScale}%`}
-          onChange={(event) => onUiScaleChange(Number(event.currentTarget.value))}
-        />
-        <small>只保存在当前设备；不会改变画面分辨率、操作灵敏度或游戏存档。</small>
-      </div>
-      <SaveTransferControls
-        localDurability={localSaveDurability}
-        state={saveTransferState}
-        hasPreImport={hasPreImportSave}
-        onPrepareExport={onPrepareSaveExport}
-        onSelectImport={onSelectSaveImport}
-        onConfirmImport={onConfirmSaveImport}
-        onCancelImport={onCancelSaveImport}
-        onPreparePreImportRestore={onPreparePreImportRestore}
-      />
-      {!confirmRestart ? (
-        <button className="button-danger full-width" onClick={() => setConfirmRestart(true)}>放弃本局并重新开始</button>
-      ) : (
-        <div className="save-reset-confirm" role="alert">
-          <p>新游戏会删除本地的主存档、备份与损坏隔离副本，并用新进度覆盖 Toy 云存档。已解锁的配方知识会保留。</p>
-          <div><button className="button-danger" onClick={onRestart}>确认删除并开始</button><button className="button-ghost" onClick={() => setConfirmRestart(false)}>取消</button></div>
+      <section className="pause-hero" aria-label="暂停状态">
+        <div>
+          <small>游戏已暂停</small>
+          <strong>雨林中的时间已经停下</strong>
+          <p>返回前先确认方向、身体状态和眼前最危险的问题。</p>
         </div>
-      )}
+        <button className="button-primary" onClick={onResume}>返回雨林</button>
+      </section>
+
+      <nav
+        className="pause-section-nav"
+        role="tablist"
+        aria-label="暂停菜单分类"
+        onKeyDown={(event) => {
+          const currentIndex = PAUSE_SECTION_IDS.indexOf(activeSection);
+          let nextIndex = currentIndex;
+          if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+            nextIndex = (currentIndex + 1) % PAUSE_SECTION_IDS.length;
+          } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+            nextIndex = (currentIndex - 1 + PAUSE_SECTION_IDS.length) % PAUSE_SECTION_IDS.length;
+          } else if (event.key === "Home") {
+            nextIndex = 0;
+          } else if (event.key === "End") {
+            nextIndex = PAUSE_SECTION_IDS.length - 1;
+          } else {
+            return;
+          }
+          event.preventDefault();
+          selectSection(PAUSE_SECTION_IDS[nextIndex], true);
+        }}
+      >
+        {PAUSE_SECTION_IDS.map((section, index) => (
+          <button
+            key={section}
+            ref={(node) => { pauseTabRefs.current[index] = node; }}
+            id={`pause-tab-${section}`}
+            type="button"
+            role="tab"
+            aria-selected={activeSection === section}
+            aria-controls={`pause-section-${section}`}
+            tabIndex={activeSection === section ? 0 : -1}
+            onClick={() => selectSection(section)}
+          >
+            {PAUSE_SECTION_LABELS[section]}
+          </button>
+        ))}
+      </nav>
+
+      <section
+        id={`pause-section-${activeSection}`}
+        className={`pause-section-content pause-section-${activeSection}`}
+        role="tabpanel"
+        aria-labelledby={`pause-tab-${activeSection}`}
+      >
+        {activeSection === "overview" && (
+          <div className="pause-overview-grid">
+            <article className="pause-overview-card">
+              <small>存档状态</small>
+              {saveCard}
+              <p>手动保存写入当前活动档；休息和关键任务仍会轮转自动恢复点。</p>
+            </article>
+            <article className="pause-overview-card">
+              <small>返回前检查</small>
+              <strong>方向 · 状态 · 天气</strong>
+              <p>确认手表方向、优先处理伤口，再决定继续探索还是返回营地。</p>
+              <button className="button-ghost" type="button" onClick={() => selectSection("settings", true)}>调整界面与声音</button>
+            </article>
+          </div>
+        )}
+
+        {activeSection === "saves" && (
+          <>
+            <header className="pause-section-heading">
+              <div><small>存档与恢复</small><strong>决定从哪里继续</strong></div>
+              <p>手动档不会被自动轮转覆盖；导入前会保留一份回滚副本。</p>
+            </header>
+            {saveCard}
+            <CheckpointTimelinePanel
+              entries={checkpointEntries}
+              recommendedSlotId={recommendedCheckpointSlotId}
+              busyManualSlot={manualCheckpointSlot}
+              mode="manage"
+              onSaveManual={onSaveManualCheckpoint}
+              onSelect={onPreviewCheckpoint}
+            />
+            <SaveTransferControls
+              localDurability={localSaveDurability}
+              state={saveTransferState}
+              hasPreImport={hasPreImportSave}
+              onPrepareExport={onPrepareSaveExport}
+              onSelectImport={onSelectSaveImport}
+              onConfirmImport={onConfirmSaveImport}
+              onCancelImport={onCancelSaveImport}
+              onPreparePreImportRestore={onPreparePreImportRestore}
+            />
+          </>
+        )}
+
+        {activeSection === "settings" && (
+          <>
+            <header className="pause-section-heading">
+              <div><small>显示与声音</small><strong>让信息保持清楚但不过载</strong></div>
+              <p>这些选项只影响当前设备，不会改变游戏进度。</p>
+            </header>
+            <button className="setting-row" onClick={onToggleAudio}><span>环境音与提示音</span><b>{audioEnabled ? "开启" : "关闭"}</b></button>
+            <button className="setting-row" onClick={onToggleReducedMotion}><span>减弱镜头与粒子运动</span><b>{reducedMotion ? "开启" : "关闭"}</b></button>
+            <div className="setting-range-row">
+              <div><label htmlFor="ui-scale-range">UI 控件大小</label><output htmlFor="ui-scale-range">{uiScale}%</output></div>
+              <input
+                id="ui-scale-range"
+                type="range"
+                min={UI_SCALE_MIN}
+                max={UI_SCALE_MAX}
+                step={UI_SCALE_STEP}
+                value={uiScale}
+                aria-valuetext={`${uiScale}%`}
+                onChange={(event) => onUiScaleChange(Number(event.currentTarget.value))}
+              />
+              <small>只保存在当前设备；不会改变画面分辨率、操作灵敏度或游戏存档。</small>
+            </div>
+          </>
+        )}
+
+        {activeSection === "session" && (
+          <section className="pause-danger-zone" aria-label="本局管理">
+            <small>危险操作</small>
+            <strong>放弃当前生存进度</strong>
+            <p>只有确认开始新游戏时才会清除本地主存档、备份和恢复点。配方知识会保留。</p>
+            {!confirmRestart ? (
+              <button className="button-danger full-width" onClick={() => setConfirmRestart(true)}>放弃本局并重新开始</button>
+            ) : (
+              <div className="save-reset-confirm" role="alert">
+                <p>新游戏会删除本地的主存档、备份与损坏隔离副本，并用新进度覆盖 Toy 云存档。已解锁的配方知识会保留。</p>
+                <div><button className="button-danger" onClick={onRestart}>确认删除并开始</button><button className="button-ghost" onClick={() => setConfirmRestart(false)}>取消</button></div>
+              </div>
+            )}
+          </section>
+        )}
+      </section>
     </div>
   );
 }
