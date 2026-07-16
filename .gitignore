@@ -19,6 +19,10 @@
 /.next/
 /.vinext/
 /out/
+/toy-out/
+/wiki-out/
+/game-dev-handbook-out/
+/.toy-smoke/
 
 # misc
 .DS_Store
@@ -30,6 +34,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 /qa-http.*
+/.codex-dev.*.log
+/.mobile-dev.*.log
+/.handbook-http.*
 
 # env files (can opt-in for committing if needed)
 .env*

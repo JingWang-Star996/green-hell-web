@@ -310,3 +310,25 @@
 
 这些复核只用于校准体验，不要求 CANOPY 使用相同数值。
 
+## 9. 2026-07-14 交互可靠性与长期循环补充研究
+
+本轮不是抄数值，而是核对成熟生存游戏如何让“动作—结果—长期状态”形成一致契约。
+
+### 9.1 可观察参考
+
+- Green Hell 的 Notebook 按建造、制作、食物、药用植物等意图组织知识，而不是把所有操作平铺在同一列表中：[Notebook](https://greenhell.fandom.com/wiki/Notebook)。
+- Green Hell 的建造以蓝图、收集材料和世界内完成结构为核心，睡眠会推进八个游戏小时；原作将睡眠与保存分开：[Building](https://greenhell.fandom.com/wiki/Building)、[Sleeping](https://greenhell.fandom.com/wiki/Sleeping)、[Save](https://greenhell.fandom.com/wiki/Save)。
+- Green Hell 的常见食物保质期以游戏日计，干燥等处理明显延长保存期，不是拿到数分钟就普遍腐坏：[Cooking](https://greenhell.fandom.com/wiki/Cooking)。
+- ARK 的入门流程明确使用快捷栏选择工具并在第一人称世界执行采集；资源具有随机产量，且玩家或建筑附近的资源不会直接重生：[Getting Started](https://ark.wiki.gg/wiki/Getting_Started)、[Harvest](https://ark.wiki.gg/wiki/Harvest)。
+- ARK 的建筑流程包含世界预览、旋转和放置，而不是从菜单直接把唯一建筑写死在固定坐标：[Building](https://ark.wiki.gg/wiki/Building)。
+
+### 9.2 对 CANOPY 的原创落地
+
+1. `1/2/3/Q` 与背包动作只改变显式装备状态；背包里“拥有”工具不再自动提供战斗或采集效果。
+2. 树木是带稳定 ID、数量、刷新计划和碰撞的模拟实体；渲染层只展示模拟结果。
+3. 建造先进入绿色/红色世界预览，支持旋转、取消和确认；模拟层二次验证后才原子扣料并记录位置。
+4. 48 分钟游戏日与按游戏小时计的腐败、火和天气窗口共同形成可读节奏；休息用普通固定步推进八个游戏小时。
+5. 普通资源按世界种子、节点和刷新周期得到不同的确定性随机窗口与批量，只在离开玩家后显现；任务物件永不刷新。
+6. 本项目有意偏离原作的“睡眠不等于保存”：Toy 网页环境更容易因刷新、宿主切换或移动浏览器回收而丢会话，因此睡眠、任务和关键建造均触发本地优先自动存档，同时保留手动存档。
+
+这些选择借鉴的是成熟交互范式，不使用参考游戏的地图、资产、故事、文本或受保护表达。

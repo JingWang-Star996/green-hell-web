@@ -2,9 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  DEFAULT_STRUCTURE_PLACEMENTS,
   FIXED_DT_SECONDS,
+  gameHoursToSimulationSeconds,
+  REST_SIMULATION_SECONDS,
   ITEM_IDS,
   applyCommand,
+  authoredSnakeIndividualId,
   createInitialState,
   getDiscoveredRecipeIds,
   nextRandom,
@@ -12,6 +16,27 @@ import {
   stepSimulation,
 } from "../../src/game/sim/index";
 import type { GameState, Inventory, ItemId } from "../../src/game/sim/index";
+import { RESOURCE_REGENERATION } from "../../src/game/sim/content";
+
+function maximumRegenerationSeconds(
+  definition: NonNullable<(typeof RESOURCE_REGENERATION)[ItemId]>,
+): number {
+  return gameHoursToSimulationSeconds(definition.maximumIntervalGameHours);
+}
+
+const SAFE_OVERNIGHT_FIRE_SECONDS = REST_SIMULATION_SECONDS * 1.16;
+const TEST_CAMPFIRE_PLACEMENT = {
+  position: { x: 0, y: 0, z: -2.8 },
+  yaw: 0,
+};
+const TEST_SHELTER_PLACEMENT = {
+  position: { x: 0, y: 0, z: 0 },
+  yaw: 0,
+};
+const TEST_BED_PLACEMENT = {
+  position: { x: 0, y: 0, z: 0 },
+  yaw: 0,
+};
 
 function stockInventory(
   state: GameState,
@@ -108,18 +133,19 @@ test("resource pickup decrements a stable entity and marks it depleted at zero",
   const entityId = "resource.stone.camp-01";
   const original = createInitialState(3);
   const position = original.world.entities[entityId].position;
+  const sourceQuantity = original.world.entities[entityId].quantity;
   let state = applyCommand(original, { type: "move-player", position });
   state = applyCommand(state, { type: "pick-up", entityId, amount: 4 });
 
   assert.equal(state.inventory.stone, 1, "the simulation, not the UI, caps a bare-hand harvest");
   assert.equal(state.clock.elapsedSeconds, 8);
-  for (let index = 0; index < 3; index += 1) {
+  for (let index = 1; index < sourceQuantity; index += 1) {
     state = applyCommand(state, { type: "pick-up", entityId, amount: 4 });
   }
-  assert.equal(state.inventory.stone, 4);
+  assert.equal(state.inventory.stone, sourceQuantity);
   assert.equal(state.world.entities[entityId].quantity, 0);
   assert.equal(state.world.entities[entityId].depleted, true);
-  assert.equal(original.world.entities[entityId].quantity, 4);
+  assert.equal(original.world.entities[entityId].quantity, sourceQuantity);
   assert.equal(original.world.entities[entityId].depleted, false);
 
   const viewEntity = selectGameView(state).worldEntities.find(
@@ -137,7 +163,8 @@ test("an axe increases harvesting throughput without bypassing finite resource n
   const equipped = createInitialState("axe-harvest");
   equipped.player.position = { ...equipped.world.entities[entityId].position };
   equipped.inventory.axe = 1;
-  const axeResult = applyCommand(equipped, { type: "pick-up", entityId, amount: 9 });
+  const holdingAxe = applyCommand(equipped, { type: "equip-item", itemId: "axe" });
+  const axeResult = applyCommand(holdingAxe, { type: "pick-up", entityId, amount: 9 });
 
   assert.equal(bareResult.inventory.stick, 1);
   assert.equal(axeResult.inventory.stick, 3);
@@ -145,9 +172,133 @@ test("an axe increases harvesting throughput without bypassing finite resource n
   assert.equal(axeResult.eventLog.at(-1)?.details?.harvestLimit, 3);
 });
 
-test("material observation unlocks knowledge instead of exposing every recipe at spawn", () => {
+test("renewable resources lazily regenerate only after time passes away from the player", () => {
+  const entityId = "resource.stick.trail-01";
+  const definition = RESOURCE_REGENERATION.stick;
+  assert.ok(definition);
+
+  let state = createInitialState("renewable-distance");
+  const initialQuantity = state.world.entities[entityId].quantity;
+  state = applyCommand(state, {
+    type: "move-player",
+    position: state.world.entities[entityId].position,
+  });
+  state = applyCommand(state, { type: "pick-up", entityId });
+
+  const harvested = state.world.entities[entityId];
+  assert.equal(harvested.quantity, initialQuantity - 1);
+  assert.equal(harvested.regeneration?.capacity, initialQuantity);
+  assert.ok(
+    (harvested.regeneration?.nextTick ?? 0) > state.clock.tick,
+    "harvesting should schedule a deterministic future deadline",
+  );
+
+  state = stepSimulation(state, {}, maximumRegenerationSeconds(definition) + 2);
+  assert.equal(
+    state.world.entities[entityId].quantity,
+    initialQuantity - 1,
+    "a due node must not pop back while the player remains beside it",
+  );
+
+  state = applyCommand(state, {
+    type: "move-player",
+    position: { x: 18, y: 0, z: 80 },
+  });
+  state = stepSimulation(state, {}, gameHoursToSimulationSeconds(0.5));
+  assert.equal(state.world.entities[entityId].quantity, initialQuantity);
+  assert.equal(state.world.entities[entityId].regeneration?.nextTick, null);
+
+  const viewEntity = selectGameView(state).worldEntities.find(
+    (entity) => entity.id === entityId,
+  );
+  assert.equal(viewEntity?.renewable, true);
+  assert.equal(viewEntity?.capacity, initialQuantity);
+  assert.equal(viewEntity?.nextRegenerationTick, null);
+});
+
+test("resource regeneration deadlines and catch-up are deterministic", () => {
+  const entityId = "resource.grubs.log-01";
+  const makeHarvestedState = () => {
+    let state = createInitialState("regeneration-determinism");
+    state = applyCommand(state, {
+      type: "move-player",
+      position: state.world.entities[entityId].position,
+    });
+    return applyCommand(state, { type: "pick-up", entityId });
+  };
+  let left = makeHarvestedState();
+  let right = makeHarvestedState();
+  assert.deepEqual(
+    left.world.entities[entityId].regeneration,
+    right.world.entities[entityId].regeneration,
+  );
+
+  for (const state of [left, right]) {
+    state.player.position = { x: 8, y: 0, z: 60 };
+  }
+  const definition = RESOURCE_REGENERATION.grubs;
+  assert.ok(definition);
+  const interval = maximumRegenerationSeconds(definition);
+  left = stepSimulation(left, {}, interval * 3 + 1);
+  right = stepSimulation(right, {}, interval * 3 + 1);
+
+  assert.deepEqual(left.world.entities[entityId], right.world.entities[entityId]);
+  assert.equal(
+    left.world.entities[entityId].quantity,
+    createInitialState(1).world.entities[entityId].quantity,
+  );
+});
+
+test("legacy resource nodes gain safe lifecycle defaults without instant refill", () => {
+  const entityId = "resource.vine.trail-01";
+  let state = createInitialState("legacy-resource-save");
+  const entity = state.world.entities[entityId];
+  const originalCapacity = entity.quantity;
+  entity.quantity = 0;
+  entity.depleted = true;
+  delete entity.regeneration;
+  state.player.position = { x: 21, y: 0, z: 80 };
+
+  state = stepSimulation(state, {}, FIXED_DT_SECONDS);
+  const migrated = state.world.entities[entityId];
+  assert.equal(migrated.quantity, 0, "legacy depletion must not refill immediately");
+  assert.equal(migrated.regeneration?.capacity, originalCapacity);
+  assert.ok((migrated.regeneration?.nextTick ?? 0) > state.clock.tick);
+
+  state = stepSimulation(
+    state,
+    {},
+    maximumRegenerationSeconds(RESOURCE_REGENERATION.vine!) + 1,
+  );
+  assert.ok(
+    state.world.entities[entityId].quantity >=
+      RESOURCE_REGENERATION.vine!.minimumAmount,
+  );
+  assert.ok(
+    state.world.entities[entityId].quantity <=
+      RESOURCE_REGENERATION.vine!.maximumAmount,
+  );
+  assert.equal(state.world.entities[entityId].depleted, false);
+});
+
+test("the objective battery never regenerates, including malformed legacy lifecycle data", () => {
+  const entityId = "resource.battery.weather-station";
+  let state = createInitialState("finite-battery");
+  const battery = state.world.entities[entityId];
+  battery.quantity = 0;
+  battery.depleted = true;
+  battery.regeneration = { capacity: 1, nextTick: state.clock.tick };
+  state.player.position = { x: -50, y: 0, z: -50 };
+
+  state = stepSimulation(state, {}, 600);
+  assert.equal(state.world.entities[entityId].quantity, 0);
+  assert.equal(state.world.entities[entityId].depleted, true);
+  assert.equal(state.world.entities[entityId].regeneration, undefined);
+});
+
+test("the opening wound objective exposes bandaging without revealing the full catalogue", () => {
   let state = createInitialState("knowledge-loop");
-  assert.deepEqual(getDiscoveredRecipeIds(state), ["stone-blade"]);
+  assert.deepEqual(getDiscoveredRecipeIds(state), ["stone-blade", "bandage"]);
 
   for (const entityId of ["resource.medicinal.camp-01", "resource.vine.camp-01"]) {
     state = applyCommand(state, { type: "move-player", position: state.world.entities[entityId].position });
@@ -155,7 +306,7 @@ test("material observation unlocks knowledge instead of exposing every recipe at
   }
 
   assert.ok(getDiscoveredRecipeIds(state).includes("bandage"));
-  assert.ok(state.eventLog.some((event) => event.type === "recipe-discovered" && event.details?.recipeId === "bandage"));
+  assert.ok(state.knowledge?.announcedRecipeIds.includes("bandage"));
   assert.equal(getDiscoveredRecipeIds(state).includes("radio-beacon"), false);
 });
 
@@ -170,6 +321,9 @@ test("boiling converts dirty water atomically and dirty water can cause parasite
     fuelSeconds: 120,
     rainExposure: 0,
     sheltered: false,
+  };
+  cleanState.player.position = {
+    ...DEFAULT_STRUCTURE_PLACEMENTS.campfire.position,
   };
   cleanState = applyCommand(cleanState, { type: "boil-water" });
 
@@ -226,8 +380,9 @@ test("bandaging prevents the untreated wound spiral", () => {
   assert.equal(bandaged.objectives.flags.woundTreated, true);
 });
 
-test("snake encounters create a real consequence and a crafted spear changes the outcome", () => {
+test("legacy snake contact routes into embodied combat while a spear requires explicit hits", () => {
   const hazardId = "hazard.snake.stream-ridge";
+  const snakeId = authoredSnakeIndividualId(hazardId);
   let bitten = createInitialState("snake-bite");
   bitten = applyCommand(bitten, {
     type: "move-player",
@@ -235,22 +390,30 @@ test("snake encounters create a real consequence and a crafted spear changes the
   });
   bitten = applyCommand(bitten, { type: "encounter-hazard", entityId: hazardId });
 
-  assert.equal(bitten.world.entities[hazardId].depleted, true);
-  assert.ok(bitten.player.vitals.health < 72, "the approach time keeps an untreated wound causal");
+  assert.equal(bitten.world.entities[hazardId].depleted, false);
+  assert.ok(bitten.player.vitals.health < 84, "the embodied bite has a real health consequence");
   assert.equal(bitten.player.conditions.wound.open, true);
   assert.equal(bitten.eventLog.at(-1)?.type, "snake-bite");
 
   let armed = createInitialState("snake-spear");
   armed.inventory.spear = 1;
+  armed = applyCommand(armed, { type: "equip-item", itemId: "spear" });
   armed = applyCommand(armed, {
     type: "move-player",
     position: armed.world.entities[hazardId].position,
   });
-  armed = applyCommand(armed, { type: "encounter-hazard", entityId: hazardId });
+  armed = applyCommand(armed, {
+    type: "attack-wildlife",
+    individualId: snakeId,
+  });
+  armed = applyCommand(armed, {
+    type: "attack-wildlife",
+    individualId: snakeId,
+  });
 
-  assert.ok(armed.player.vitals.health < 84);
-  assert.ok(Math.abs((armed.player.vitals.health - bitten.player.vitals.health) - 12) < 0.02);
-  assert.equal(armed.eventLog.at(-1)?.type, "threat-avoided");
+  assert.ok(armed.player.vitals.health > bitten.player.vitals.health);
+  assert.equal(armed.ecology?.individuals?.[snakeId]?.health, 0);
+  assert.ok(armed.eventLog.some((event) => event.type === "wildlife-defeated"));
 });
 
 test("heavy rain extinguishes an exposed fire but not a sheltered one", () => {
@@ -264,6 +427,29 @@ test("heavy rain extinguishes an exposed fire but not a sheltered one", () => {
       sheltered,
     };
     state.camp.shelterBuilt = sheltered;
+    state.camp.structures = [
+      {
+        id: "structure.campfire.rain-test",
+        kind: "campfire",
+        position: { x: 0, y: 0, z: 0 },
+        yaw: 0,
+        builtAtTick: 0,
+      },
+      ...(sheltered
+        ? [
+            {
+              id: "structure.shelter.rain-test",
+              kind: "shelter" as const,
+              position: { x: 1.5, y: 0, z: 0 },
+              yaw: 0,
+              builtAtTick: 0,
+            },
+          ]
+        : []),
+    ];
+    if (sheltered) {
+      state.player.position = { x: 1.5, y: 0, z: 0 };
+    }
     state.weather.rainIntensity = 1;
     state.weather.targetRainIntensity = 1;
     state.weather.secondsUntilChange = 999;
@@ -288,7 +474,9 @@ test("a built bed provides a meaningful rest tradeoff", () => {
   const state = createInitialState("rest-tradeoff");
   state.camp.bedBuilt = true;
   state.camp.shelterBuilt = true;
-  state.player.position = { ...state.camp.position };
+  state.player.position = {
+    ...DEFAULT_STRUCTURE_PLACEMENTS.bed.position,
+  };
   state.player.vitals.energy = 28;
   state.player.nutrition.hydration = 50;
   state.player.conditions.wetness = 48;
@@ -297,7 +485,11 @@ test("a built bed provides a meaningful rest tradeoff", () => {
   assert.ok(rested.player.vitals.energy > state.player.vitals.energy);
   assert.ok(rested.player.nutrition.hydration < state.player.nutrition.hydration);
   assert.ok(rested.player.conditions.wetness < state.player.conditions.wetness);
-  assert.ok(rested.clock.elapsedSeconds >= 25);
+  assert.equal(
+    rested.clock.elapsedSeconds,
+    REST_SIMULATION_SECONDS,
+    "rest resolves exactly eight authored hours",
+  );
   assert.equal(rested.eventLog.at(-1)?.type, "rest-completed");
   rested.camp.fire = { built: true, lit: true, fuelSeconds: 120, rainExposure: 0, sheltered: true };
   const verified = applyCommand(rested, { type: "move-player", position: rested.camp.position });
@@ -309,6 +501,7 @@ test("the battery cannot be meta-rushed without the authored investigation chain
   let state = createInitialState("investigation-gate");
   state.objectives.flags.campEstablished = true;
   state.inventory.axe = 1;
+  state = applyCommand(state, { type: "equip-item", itemId: "axe" });
   state = applyCommand(state, { type: "move-player", position: state.world.entities[batteryId].position });
   const rushed = applyCommand(state, { type: "pick-up", entityId: batteryId });
 
@@ -346,14 +539,37 @@ test("full objective chain ends in a causal victory event", () => {
   });
 
   state = applyCommand(state, { type: "use-item", itemId: "bandage" });
-  state = applyCommand(state, { type: "craft", recipeId: "campfire" });
-  state = applyCommand(state, { type: "craft", recipeId: "shelter" });
-  while (!state.camp.fire.lit || state.camp.fire.fuelSeconds < 160) {
+  state = applyCommand(state, {
+    type: "craft",
+    recipeId: "shelter",
+    placement: TEST_SHELTER_PLACEMENT,
+  });
+  state = applyCommand(state, {
+    type: "craft",
+    recipeId: "campfire",
+    placement: TEST_CAMPFIRE_PLACEMENT,
+  });
+  state = applyCommand(state, {
+    type: "move-player",
+    position: TEST_CAMPFIRE_PLACEMENT.position,
+  });
+  while (
+    !state.camp.fire.lit ||
+    state.camp.fire.fuelSeconds < SAFE_OVERNIGHT_FIRE_SECONDS
+  ) {
     state = applyCommand(state, { type: "add-fuel" });
   }
   state = applyCommand(state, { type: "boil-water" });
   state = applyCommand(state, { type: "drink-water", itemId: "clean-water" });
-  state = applyCommand(state, { type: "craft", recipeId: "bed" });
+  state = applyCommand(state, {
+    type: "craft",
+    recipeId: "bed",
+    placement: TEST_BED_PLACEMENT,
+  });
+  state = applyCommand(state, {
+    type: "move-player",
+    position: TEST_BED_PLACEMENT.position,
+  });
   state = applyCommand(state, { type: "rest" });
 
   for (const landmarkId of [
@@ -373,16 +589,25 @@ test("full objective chain ends in a causal victory event", () => {
     type: "move-player",
     position: state.world.entities[batteryId].position,
   });
+  state = applyCommand(state, { type: "equip-item", itemId: "axe" });
   state = applyCommand(state, { type: "pick-up", entityId: batteryId });
   state = applyCommand(state, {
     type: "move-player",
     position: state.camp.position,
   });
   state = applyCommand(state, { type: "craft", recipeId: "radio-beacon" });
-  state = applyCommand(state, { type: "transmit" });
+  const beacon = state.camp.structures?.find(
+    (structure) => structure.kind === "radio-beacon",
+  );
+  assert.ok(beacon);
+  state = applyCommand(state, {
+    type: "move-player",
+    position: beacon.position,
+  });
+  state = applyCommand(state, { type: "transmit", structureId: beacon.id });
 
-  assert.equal(state.status, "won");
-  assert.equal(state.objectives.currentTaskId, null);
+  assert.equal(state.status, "playing");
+  assert.equal(state.objectives.currentTaskId, "river-rising");
   assert.deepEqual(state.objectives.completedTaskIds, [
     "treat-wound",
     "purify-water",
@@ -390,8 +615,8 @@ test("full objective chain ends in a causal victory event", () => {
     "recover-battery",
     "transmit-signal",
   ]);
-  assert.equal(state.eventLog.at(-1)?.type, "game-won");
-  assert.equal(state.eventLog.at(-1)?.cause.code, "objective-chain-complete");
+  assert.equal(state.eventLog.at(-1)?.type, "task-completed");
+  assert.equal(state.eventLog.at(-1)?.details?.taskId, "transmit-signal");
 });
 
 test("the authored world economy contains a complete harvest-to-rescue path", () => {
@@ -423,6 +648,7 @@ test("the authored world economy contains a complete harvest-to-rescue path", ()
   state = applyCommand(state, { type: "craft", recipeId: "stone-blade" });
   harvest("resource.stick.camp-01", 1);
   state = applyCommand(state, { type: "craft", recipeId: "axe" });
+  state = applyCommand(state, { type: "equip-item", itemId: "axe" });
   harvest("resource.coconut.stream-01", 1);
   state = applyCommand(state, { type: "craft", recipeId: "coconut-shell" });
   state = applyCommand(state, {
@@ -438,16 +664,40 @@ test("the authored world economy contains a complete harvest-to-rescue path", ()
   harvest("resource.dry-leaf.camp-01", 4);
   harvest("resource.leaf.camp-01", 10);
   state = applyCommand(state, { type: "move-player", position: state.camp.position });
-  state = applyCommand(state, { type: "craft", recipeId: "campfire" });
-  state = applyCommand(state, { type: "craft", recipeId: "shelter" });
-  while (!state.camp.fire.lit || state.camp.fire.fuelSeconds < 160) {
+  state = applyCommand(state, {
+    type: "craft",
+    recipeId: "shelter",
+    placement: TEST_SHELTER_PLACEMENT,
+  });
+  state = applyCommand(state, {
+    type: "craft",
+    recipeId: "campfire",
+    placement: TEST_CAMPFIRE_PLACEMENT,
+  });
+  state = applyCommand(state, {
+    type: "move-player",
+    position: TEST_CAMPFIRE_PLACEMENT.position,
+  });
+  while (
+    !state.camp.fire.lit ||
+    state.camp.fire.fuelSeconds < SAFE_OVERNIGHT_FIRE_SECONDS
+  ) {
     state = applyCommand(state, { type: "add-fuel" });
   }
   state = applyCommand(state, { type: "boil-water" });
   state = applyCommand(state, { type: "drink-water", itemId: "clean-water" });
-  state = applyCommand(state, { type: "craft", recipeId: "bed" });
+  state = applyCommand(state, {
+    type: "craft",
+    recipeId: "bed",
+    placement: TEST_BED_PLACEMENT,
+  });
+  state = applyCommand(state, {
+    type: "move-player",
+    position: TEST_BED_PLACEMENT.position,
+  });
   state = applyCommand(state, { type: "rest" });
   state = applyCommand(state, { type: "craft", recipeId: "spear" });
+  state = applyCommand(state, { type: "equip-item", itemId: "spear" });
 
   for (const landmarkId of ["landmark.survey-cache", "landmark.weather-station"]) {
     state = applyCommand(state, { type: "move-player", position: state.world.entities[landmarkId].position });
@@ -455,17 +705,29 @@ test("the authored world economy contains a complete harvest-to-rescue path", ()
   }
   const routeHazard = "hazard.snake.station-trail";
   state = applyCommand(state, { type: "move-player", position: state.world.entities[routeHazard].position });
-  state = applyCommand(state, { type: "encounter-hazard", entityId: routeHazard });
+  const routeSnake = authoredSnakeIndividualId(routeHazard);
+  state = applyCommand(state, { type: "attack-wildlife", individualId: routeSnake });
+  state = applyCommand(state, { type: "attack-wildlife", individualId: routeSnake });
 
+  state = applyCommand(state, { type: "equip-item", itemId: "axe" });
   harvest("resource.battery.weather-station", 1);
   state = applyCommand(state, { type: "move-player", position: state.camp.position });
   state = applyCommand(state, { type: "craft", recipeId: "radio-beacon" });
-  state = applyCommand(state, { type: "transmit" });
+  const beacon = state.camp.structures?.find(
+    (structure) => structure.kind === "radio-beacon",
+  );
+  assert.ok(beacon);
+  state = applyCommand(state, {
+    type: "move-player",
+    position: beacon.position,
+  });
+  state = applyCommand(state, { type: "transmit", structureId: beacon.id });
 
-  assert.equal(state.status, "won");
-  assert.equal(state.eventLog.at(-1)?.type, "game-won");
-  assert.ok(state.clock.elapsedSeconds >= 600, `critical path was only ${state.clock.elapsedSeconds}s`);
-  assert.ok(state.clock.elapsedSeconds <= 900, `critical path exceeded the bounded target: ${state.clock.elapsedSeconds}s`);
+  assert.equal(state.status, "playing");
+  assert.equal(state.objectives.currentTaskId, "river-rising");
+  assert.equal(state.eventLog.at(-1)?.type, "task-completed");
+  assert.ok(state.clock.elapsedSeconds >= 1_500, `critical path was only ${state.clock.elapsedSeconds}s`);
+  assert.ok(state.clock.elapsedSeconds <= 1_950, `critical path exceeded the bounded target: ${state.clock.elapsedSeconds}s`);
 });
 
 test("terminal loss is emitted once with an explicit cause", () => {
@@ -518,7 +780,10 @@ test("10,000 ticks preserve all state invariants and renderer projection", () =>
   assert.ok(state.eventLog.length <= 256);
   assert.ok(
     Object.values(state.world.entities).every(
-      (entity) => entity.quantity >= 0 && entity.depleted === (entity.quantity === 0),
+      (entity) =>
+        entity.quantity >= 0 &&
+        entity.depleted ===
+          (entity.quantity === 0 && entity.treeHarvest === undefined),
     ),
   );
 

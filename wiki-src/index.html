@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#07130d" />
+    <meta name="description" content="CANOPY: First Night 完整游戏 Wiki。基于当前可运行代码整理物品、配方、建造、生态、任务、存档和操作。" />
+    <title>CANOPY 生存档案｜完整游戏 Wiki</title>
+    <link rel="icon" href="./assets/icon.svg" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#wiki-main">跳到 Wiki 正文</a>
+    <header class="hero" id="top">
+      <img class="hero-art" src="./assets/canopy-cover.png" alt="暴雨中的雨林营地、坠毁点与远处气象站" />
+      <div class="hero-scrim"></div>
+      <div class="hero-content">
+        <div class="eyebrow"><span class="signal-dot"></span> CANOPY FIELD ARCHIVE · CODE-VERIFIED</div>
+        <p class="kicker">雨林不是背景，而是一套会记住你的生存系统。</p>
+        <h1>CANOPY<br /><em>生存档案</em></h1>
+        <p class="hero-summary">从第一片干叶到林冠 C-17：查物品、找配方、读群系、理解生态，也看清哪些内容现在真的能玩。</p>
+        <div class="hero-actions">
+          <a class="button button-primary" href="#start">开始查阅</a>
+          <a class="button button-ghost" href="https://www.bilibili.com/toy/green-hell-web/index.html" target="_top">进入游戏</a>
+        </div>
+        <div class="hero-stats" id="hero-stats" aria-label="Wiki 内容统计"></div>
+      </div>
+    </header>
+
+    <div class="toolbar-shell">
+      <div class="toolbar" role="search">
+        <label class="search-box" for="wiki-search">
+          <span aria-hidden="true">⌕</span>
+          <input id="wiki-search" type="search" autocomplete="off" placeholder="搜索物品、配方、任务、动物、机制……" />
+          <kbd>/</kbd>
+        </label>
+        <button id="spoiler-toggle" class="spoiler-toggle" type="button" aria-pressed="false">
+          <span aria-hidden="true">◉</span><span>隐藏剧情剧透</span>
+        </button>
+        <output id="search-status" class="search-status" aria-live="polite"></output>
+      </div>
+      <nav class="section-nav" aria-label="Wiki 章节">
+        <a href="#start">入门</a>
+        <a href="#items">物品</a>
+        <a href="#crafting">制作建造</a>
+        <a href="#survival">生存</a>
+        <a href="#world">世界</a>
+        <a href="#ecology">生态</a>
+        <a href="#campaign">任务</a>
+        <a href="#save">存档</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </div>
+
+    <main id="wiki-main">
+      <section id="start" class="wiki-section section-intro" data-section>
+        <div class="section-heading">
+          <div><span class="section-index">01</span><p class="section-kicker">SURVIVAL BOOT SEQUENCE</p></div>
+          <div><h2>第一夜，从这里开始</h2><p>一条不依赖隐藏捷径的前十五分钟路线。</p></div>
+        </div>
+        <div id="quick-start" class="step-grid"></div>
+        <div class="truth-banner">
+          <strong>这份 Wiki 的口径</strong>
+          <p id="accuracy-copy"></p>
+          <span id="build-stamp"></span>
+        </div>
+        <div class="split-grid">
+          <article class="panel">
+            <header><span>INPUT</span><h3>键鼠与触控</h3></header>
+            <div id="controls" class="control-list"></div>
+          </article>
+          <article class="panel">
+            <header><span>AFFORDANCE</span><h3>如何读懂可交互物</h3></header>
+            <div id="interaction-rules" class="rule-list"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="items" class="wiki-section" data-section>
+        <div class="section-heading">
+          <div><span class="section-index">02</span><p class="section-kicker">FIELD INVENTORY</p></div>
+          <div><h2>物品图鉴</h2><p>堆叠、营养、腐坏、耐久、来源与用途都来自当前代码。</p></div>
+        </div>
+        <div id="item-filters" class="filter-row" aria-label="物品分类"></div>
+        <div id="item-grid" class="card-grid item-grid"></div>
+      </section>
+
+      <section id="crafting" class="wiki-section" data-section>
+        <div class="section-heading">
+          <div><span class="section-index">03</span><p class="section-kicker">CRAFT & BUILD</p></div>
+          <div><h2>制作与建造</h2><p>材料、工具门槛、工作时间和建筑的真实环境关系。</p></div>
+        </div>
+        <div class="subsection-heading"><h3>配方全表</h3><span id="recipe-count"></span></div>
+        <div id="recipe-grid" class="card-grid recipe-grid"></div>
+        <div class="subsection-heading"><h3>生存设施</h3><span>普通设施均可重复放置</span></div>
+        <div id="structure-grid" class="card-grid structure-grid"></div>
+        <div class="processing-grid">
+          <article class="data-panel"><h3>烟熏效率</h3><div id="smoking-table"></div></article>
+          <article class="data-panel"><h3>集雨效率</h3><div id="rain-table"></div></article>
+        </div>
+      </section>
+
+      <section id="survival" class="wiki-section" data-section>
+        <div class="section-heading">
+          <div><span class="section-index">04</span><p class="section-kicker">BODY & TIME</p></div>
+          <div><h2>生存系统</h2><p>状态不是几根条：营养、伤口、天气与时间会互相放大。</p></div>
+        </div>
+        <div id="survival-grid" class="card-grid survival-grid"></div>
+        <article class="director-panel">
+          <div><span class="section-kicker">LIVING RESOURCE DIRECTOR</span><h3>资源为什么不会整批刷新</h3><p id="director-summary"></p></div>
+          <ol id="director-rules"></ol>
+        </article>
+        <div class="subsection-heading"><h3>普通资源再生窗口</h3><span>必须离开视野与保护距离</span></div>
+        <div id="regeneration-grid" class="regen-grid"></div>
+      </section>
+
+      <section id="world" class="wiki-section" data-section>
+        <div class="section-heading">
+          <div><span class="section-index">05</span><p class="section-kicker">PROCEDURAL RAINFOREST</p></div>
+          <div><h2>群系与资源地理</h2><p>48 米区块构成可扩展世界；不同群系记录湿度、冠层和资源权重。移动倍率尚未接入当前模拟。</p></div>
+        </div>
+        <div id="biome-grid" class="biome-grid"></div>
+        <div class="taxonomy-tabs" role="tablist" aria-label="自然对象分类">
+          <button type="button" role="tab" aria-selected="true" data-taxonomy="plants">植物</button>
+          <button type="button" role="tab" aria-selected="false" data-taxonomy="trees">树木</button>
+          <button type="button" role="tab" aria-selected="false" data-taxonomy="rocks">岩体</button>
+        </div>
+        <div id="taxonomy-grid" class="card-grid taxonomy-grid"></div>
+      </section>
+
+      <section id="ecology" class="wiki-section" data-section>
+        <div class="section-heading">
+          <div><span class="section-index">06</span><p class="section-kicker">WILDLIFE LEDGER</p></div>
+          <div><h2>动物、威胁与活动时间</h2><p>这些是有生命、警觉、受伤和恢复状态的个体，不是路边判定盒。</p></div>
+        </div>
+        <div id="fauna-grid" class="fauna-grid"></div>
+        <aside class="scope-note"><strong>生态边界：</strong>当前已有种群、活动时间、环境适应、狩猎、尸体与部分火焰反应；完整捕食链、食腐、承载力回写和鱼类生态仍未闭环。</aside>
+      </section>
+
+      <section id="campaign" class="wiki-section" data-section>
+        <div class="section-heading">
+          <div><span class="section-index">07</span><p class="section-kicker">FIELD CAMPAIGN</p></div>
+          <div><h2>任务与剧情进度</h2><p>序章、A1 与 A2 是当前实现；后续章节不会混进可玩任务表。</p></div>
+        </div>
+        <div id="task-timeline" class="task-timeline"></div>
+      </section>
+
+      <section id="save" class="wiki-section" data-section>
+        <div class="section-heading">
+          <div><span class="section-index">08</span><p class="section-kicker">RECOVERY PROTOCOL</p></div>
+          <div><h2>存档、恢复与导入导出</h2><p>本地成功优先，云端是镜像；死亡不会把你锁死在唯一的坏档里。</p></div>
+        </div>
+        <div class="save-layout">
+          <div class="save-counter"><strong id="manual-count">3</strong><span>手动槽</span></div>
+          <div class="save-counter"><strong id="auto-count">10</strong><span>自动恢复点</span></div>
+          <ol id="save-features"></ol>
+        </div>
+      </section>
+
+      <section id="faq" class="wiki-section" data-section>
+        <div class="section-heading">
+          <div><span class="section-index">09</span><p class="section-kicker">FIELD TROUBLESHOOTING</p></div>
+          <div><h2>常见问题</h2><p>优先回答那些会让玩家怀疑自己操作错了的问题。</p></div>
+        </div>
+        <div id="faq-list" class="faq-list"></div>
+      </section>
+
+      <section id="boundaries" class="wiki-section" data-section>
+        <div class="section-heading">
+          <div><span class="section-index">10</span><p class="section-kicker">DELIVERY BOUNDARY</p></div>
+          <div><h2>已经实现、部分实现、尚未实现</h2><p>这是 Wiki 的防误报层，也是后续开发的真实基线。</p></div>
+        </div>
+        <div id="roadmap-grid" class="roadmap-grid"></div>
+        <details class="source-index">
+          <summary>查看本 Wiki 的主要代码事实源</summary>
+          <ul id="source-list"></ul>
+        </details>
+      </section>
+
+      <div id="empty-state" class="empty-state" hidden>
+        <strong>没有找到匹配条目</strong>
+        <p>试试物品名、任务关键词、群系或动作，例如“干叶”“烟熏”“石镐”“A2”。</p>
+        <button type="button" id="clear-search">清除搜索</button>
+      </div>
+    </main>
+
+    <footer>
+      <div><span>CANOPY FIELD ARCHIVE</span><strong>一份与代码一起生长的生存手册。</strong></div>
+      <a href="#top">返回顶部 ↑</a>
+    </footer>
+
+    <noscript><div class="noscript">此 Wiki 需要 JavaScript 来载入由游戏代码生成的数据。</div></noscript>
+    <script src="./wiki-data.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>

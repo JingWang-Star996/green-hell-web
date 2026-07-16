@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b1512" />
+    <meta name="description" content="游戏创作宝典：基于 CANOPY 实战失败、重制与发布经验整理的游戏创意、设计、世界、视觉、工程、测试、Agent 协作和构建发布 Wiki。" />
+    <title>游戏创作宝典｜CANOPY 实战方法库</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">跳到正文</a>
+    <a class="skip-link skip-link-secondary" href="#global-search">跳到搜索</a>
+
+    <header class="topbar">
+      <button id="nav-toggle" class="icon-button nav-toggle" type="button" aria-controls="knowledge-nav" aria-expanded="false" aria-label="打开知识目录"><span aria-hidden="true">☰</span></button>
+      <a class="brand" href="#home" aria-label="游戏创作宝典首页">
+        <span class="brand-mark" aria-hidden="true">G</span>
+        <span><strong>游戏创作宝典</strong><small>CANOPY 实战方法库</small></span>
+      </a>
+      <label class="global-search" for="global-search">
+        <span aria-hidden="true">⌕</span>
+        <input id="global-search" type="search" autocomplete="off" placeholder="搜索原则、症状、阶段、术语……" />
+        <kbd>⌘ K</kbd>
+      </label>
+      <a class="topbar-link" href="#checklists">检查清单</a>
+      <a class="topbar-link" href="#glossary">术语</a>
+    </header>
+
+    <div id="nav-overlay" class="nav-overlay" hidden></div>
+    <div class="app-shell">
+      <aside id="knowledge-nav" class="knowledge-nav" aria-label="宝典目录">
+        <div class="nav-heading"><span>KNOWLEDGE MAP</span><button id="nav-close" class="icon-button nav-close" type="button" aria-label="关闭知识目录">×</button></div>
+        <nav>
+          <a href="#home" data-nav-link>首页</a>
+          <a href="#evidence" data-nav-link>证据口径</a>
+          <a href="#case-study" data-nav-link>CANOPY 案例</a>
+          <div class="nav-group"><span>按专业查阅</span><div id="chapter-nav"></div></div>
+          <a href="#gates" data-nav-link>G0–G9 阶段门</a>
+          <a href="#anti-patterns" data-nav-link>反模式与红旗</a>
+          <a href="#checklists" data-nav-link>检查清单</a>
+          <a href="#templates" data-nav-link>可复制模板</a>
+          <a href="#glossary" data-nav-link>术语词典</a>
+          <a href="#boundaries" data-nav-link>来源与边界</a>
+        </nav>
+        <div class="nav-footer">
+          <span>独立公开知识库</span>
+          <strong id="nav-edition"></strong>
+        </div>
+      </aside>
+
+      <main id="main-content">
+        <section id="home" class="hero section-anchor">
+          <div class="hero-grid">
+            <div class="hero-copy">
+              <div class="eyebrow"><span class="status-dot"></span> PRACTICE BEFORE FEATURES</div>
+              <h1>把一次真实踩坑<br />变成下一款游戏的<em>生产系统</em></h1>
+              <p id="hero-subtitle" class="hero-summary"></p>
+              <div class="hero-actions">
+                <a class="button button-primary" href="#reader-paths">按我的职责开始</a>
+                <a class="button button-secondary" href="#gates">查看完整制作流程</a>
+              </div>
+              <div id="hero-stats" class="hero-stats" aria-label="宝典内容统计"></div>
+            </div>
+            <aside class="hero-note" aria-label="这本宝典解决什么">
+              <span class="note-index">00</span>
+              <p>它不是长篇复盘的换皮，也不是通用鸡汤。</p>
+              <strong>每个条目都回答：</strong>
+              <ol>
+                <li>什么时候会遇到它？</li>
+                <li>怎样做才可验证？</li>
+                <li>失败信号是什么？</li>
+                <li>CANOPY 真正证明了什么？</li>
+              </ol>
+            </aside>
+          </div>
+          <div id="manifesto" class="manifesto"></div>
+        </section>
+
+        <section id="reader-paths" class="wiki-section section-anchor">
+          <header class="section-header">
+            <div><span class="section-number">START</span><p class="section-kicker">CHOOSE YOUR ROUTE</p></div>
+            <div><h2>从你正在解决的问题开始</h2><p>这是一张决策地图，不要求从第一页顺序读到最后。</p></div>
+          </header>
+          <div id="reader-path-grid" class="reader-path-grid"></div>
+        </section>
+
+        <section id="search-results" class="wiki-section search-results section-anchor" hidden>
+          <header class="section-header compact-header">
+            <div><span class="section-number">⌕</span><p class="section-kicker">SEARCH RESULTS</p></div>
+            <div><h2>全库搜索结果</h2><p id="search-summary"></p></div>
+          </header>
+          <div class="search-controls">
+            <label>专业领域<select id="search-domain"><option value="all">全部领域</option></select></label>
+            <label>证据口径<select id="search-evidence"><option value="all">全部口径</option><option value="项目事实">项目事实</option><option value="默认方法">默认方法</option><option value="开放风险">开放风险</option></select></label>
+            <button id="clear-search" type="button">清除搜索</button>
+          </div>
+          <div id="search-result-groups"></div>
+        </section>
+        <output id="search-live" class="sr-only" aria-live="polite"></output>
+
+        <div id="knowledge-content">
+          <section id="evidence" class="wiki-section section-anchor">
+            <header class="section-header">
+              <div><span class="section-number">I/U/D</span><p class="section-kicker">EVIDENCE, NOT CONFIDENCE</p></div>
+              <div><h2>有代码、能玩、已上线，是三件不同的事</h2><p>所有“完成”都必须分别回答实现、体验和部署证据。</p></div>
+            </header>
+            <div id="evidence-grid" class="evidence-grid"></div>
+            <aside id="accuracy-note" class="truth-callout"></aside>
+          </section>
+
+          <section id="case-study" class="wiki-section section-anchor">
+            <header class="section-header">
+              <div><span class="section-number">CASE</span><p class="section-kicker">CANOPY A–D</p></div>
+              <div><h2>从错误产品形态，到可验证的世界</h2><p>CANOPY 只作为证据与反例；这本宝典面向下一款游戏。</p></div>
+            </header>
+            <div id="case-timeline" class="case-timeline"></div>
+            <div class="case-links">
+              <a id="game-link" class="button button-secondary" target="_top">进入 CANOPY 游戏</a>
+              <a id="game-wiki-link" class="button button-secondary" target="_top">查看 CANOPY 玩家 Wiki</a>
+            </div>
+          </section>
+
+          <div id="chapter-sections"></div>
+
+          <section id="gates" class="wiki-section section-anchor">
+            <header class="section-header">
+              <div><span class="section-number">G0–G9</span><p class="section-kicker">EVIDENCE GATES</p></div>
+              <div><h2>正确制作流程：没过门，就回退</h2><p>阶段交付物不是完成；目标玩家通过明确协议才允许扩内容。</p></div>
+            </header>
+            <div class="gate-legend"><span>交付</span><span>通过门槛</span><span>停止 / 回退</span></div>
+            <div id="gate-list" class="gate-list"></div>
+          </section>
+
+          <section id="anti-patterns" class="wiki-section section-anchor">
+            <header class="section-header">
+              <div><span class="section-number">RED</span><p class="section-kicker">ANTI-PATTERNS</p></div>
+              <div><h2>十二个会让项目越做越假的红旗</h2><p>看到症状时回到根因，不要继续用内容和教程覆盖问题。</p></div>
+            </header>
+            <div id="anti-pattern-grid" class="anti-pattern-grid"></div>
+          </section>
+
+          <section id="checklists" class="wiki-section section-anchor">
+            <header class="section-header">
+              <div><span class="section-number">DO</span><p class="section-kicker">REUSABLE CHECKLISTS</p></div>
+              <div><h2>把经验变成每周能执行的检查</h2><p>勾选进度只保存在当前设备，不会改变条目的证据状态。</p></div>
+            </header>
+            <div id="checklist-grid" class="checklist-grid"></div>
+          </section>
+
+          <section id="templates" class="wiki-section section-anchor">
+            <header class="section-header">
+              <div><span class="section-number">COPY</span><p class="section-kicker">PROJECT TEMPLATES</p></div>
+              <div><h2>开新项目可以直接复制的六张表</h2><p>模板是默认起点；题材、团队和目标硬件不同，应由证据调整。</p></div>
+            </header>
+            <div id="template-grid" class="template-grid"></div>
+          </section>
+
+          <section id="glossary" class="wiki-section section-anchor">
+            <header class="section-header">
+              <div><span class="section-number">A–Z</span><p class="section-kicker">SHARED LANGUAGE</p></div>
+              <div><h2>术语词典</h2><p>统一设计、工程、测试、制作与发布语言，减少团队各说各话。</p></div>
+            </header>
+            <div id="glossary-filters" class="filter-row" aria-label="术语领域筛选"></div>
+            <dl id="glossary-list" class="glossary-list"></dl>
+          </section>
+
+          <section id="boundaries" class="wiki-section section-anchor">
+            <header class="section-header">
+              <div><span class="section-number">SOURCE</span><p class="section-kicker">BOUNDARY & PROVENANCE</p></div>
+              <div><h2>来源、版本和未关闭风险</h2><p>公开事实与经验模板分开，原始复盘作为可下载证据随制品保留。</p></div>
+            </header>
+            <div class="boundary-grid">
+              <article class="boundary-card"><span class="evidence-badge evidence-fact">项目事实</span><h3>来自可追溯项目记录</h3><p>只描述具体日期、具体制品、明确运行或自动化结果；不扩张为“项目整体完成”。</p></article>
+              <article class="boundary-card"><span class="evidence-badge evidence-template">默认方法</span><h3>下一项目的调参起点</h3><p>阶段门、时长和样本阈值不是行业定律，必须根据题材、团队与设备重新取证。</p></article>
+              <article class="boundary-card"><span class="evidence-badge evidence-risk">开放风险</span><h3>不能被复盘掩盖的未完成</h3><p>缺实现、真机、首次玩家或生产证据时，明确写出下一道门和回退方向。</p></article>
+            </div>
+            <div class="boundary-columns">
+              <article class="source-panel"><h3>原始证据包</h3><p>构建时复制源文档并记录字节数与 SHA-256，完整复盘不会因 Wiki 摘要而丢失。</p><ul id="source-list"></ul></article>
+              <article class="source-panel risk-panel"><h3>CANOPY 当前开放风险</h3><ul id="open-risk-list"></ul></article>
+            </div>
+            <details class="build-details"><summary>查看本宝典构建信息</summary><pre id="build-info"></pre></details>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <button id="back-to-top" class="back-to-top" type="button" aria-label="返回顶部">↑</button>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <footer><div><span>GAME CREATION HANDBOOK</span><strong>先证明因果，再扩内容。</strong></div><a href="#home">返回首页 ↑</a></footer>
+
+    <noscript><div class="noscript">此宝典需要 JavaScript 载入本地知识数据；不请求任何外部脚本或服务。</div></noscript>
+    <script src="./handbook-data.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>

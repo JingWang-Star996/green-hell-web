@@ -1,14 +1,21 @@
 export const DEFAULT_TOY_BRIDGE_TIMEOUT_MS = 1_500;
+/** Toy limits each physical key/value pair to 1 KiB in total. */
+export const TOY_CLOUD_MAX_ITEM_BYTES = 1_024;
+export const TOY_CLOUD_MAX_KEYS = 128;
+export const TOY_CLOUD_MAX_KEY_BYTES = 128;
+export const TOY_CLOUD_KEY_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 export interface RawToyBridge {
   getCloudStorage?: (keys?: string[]) => unknown;
   setCloudStorage?: (items: Record<string, string>) => unknown;
+  removeCloudStorage?: (keys: string[]) => unknown;
   reportAction?: (request: { userEventId: string }) => unknown;
 }
 
 export type ToyBridgeOperation =
   | "getCloudStorage"
   | "setCloudStorage"
+  | "removeCloudStorage"
   | "reportAction";
 
 export type ToyBridgeFailureReason =
@@ -44,6 +51,11 @@ export interface ToyBridgeClientOptions {
   ) => void;
 }
 
+export interface ToyBridgeWaitOptions {
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+}
+
 class ToyBridgeTimeoutError extends Error {
   constructor(operation: ToyBridgeOperation, timeoutMs: number) {
     super(`${operation} timed out after ${timeoutMs}ms`);
@@ -68,6 +80,36 @@ function cloneStringRecord(value: Readonly<Record<string, string>>): Record<stri
   const clone: Record<string, string> = {};
   for (const [key, item] of Object.entries(value)) clone[key] = item;
   return clone;
+}
+
+export function isValidToyCloudKey(key: unknown): key is string {
+  return (
+    typeof key === "string" &&
+    key.length > 0 &&
+    TOY_CLOUD_KEY_PATTERN.test(key) &&
+    new TextEncoder().encode(key).byteLength <= TOY_CLOUD_MAX_KEY_BYTES
+  );
+}
+
+function validCloudKeys(keys: readonly string[]): boolean {
+  return (
+    keys.length <= TOY_CLOUD_MAX_KEYS &&
+    keys.every(isValidToyCloudKey)
+  );
+}
+
+function validCloudWrite(items: Readonly<Record<string, string>>): boolean {
+  const entries = Object.entries(items);
+  return (
+    entries.length <= TOY_CLOUD_MAX_KEYS &&
+    entries.every(
+      ([key, value]) =>
+        isValidToyCloudKey(key) &&
+        new TextEncoder().encode(key).byteLength +
+          new TextEncoder().encode(value).byteLength <=
+          TOY_CLOUD_MAX_ITEM_BYTES,
+    )
+  );
 }
 
 function normalizedTimeout(value: number | undefined): number {
@@ -129,6 +171,11 @@ export class ToyBridgeClient {
   private readonly globalObject: unknown;
   private readonly canRedetect: boolean;
   private readonly onFailure?: ToyBridgeClientOptions["onFailure"];
+  /**
+   * Cloud mutations share one settlement lane. A caller-facing timeout does
+   * not release this barrier: only the host promise actually settling does.
+   */
+  private cloudMutationTail: Promise<void> = Promise.resolve();
 
   constructor(options: ToyBridgeClientOptions = {}) {
     this.timeoutMs = normalizedTimeout(options.timeoutMs);
@@ -148,12 +195,34 @@ export class ToyBridgeClient {
     return this.resolveBridge() !== null;
   }
 
+  /**
+   * Gives an asynchronously injected Toy SDK one bounded opportunity to join
+   * the first title-screen cloud discovery. This waits for the cloud read
+   * method, not merely a partially initialized `toy` object.
+   */
+  async waitForCloudStorage(options: ToyBridgeWaitOptions = {}): Promise<boolean> {
+    const timeoutMs = normalizedTimeout(options.timeoutMs ?? this.timeoutMs);
+    const pollIntervalMs = Math.min(
+      timeoutMs,
+      normalizedTimeout(options.pollIntervalMs ?? 25),
+    );
+    const deadline = Date.now() + timeoutMs;
+    while (!this.hasOperation("getCloudStorage")) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) return false;
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, Math.min(pollIntervalMs, remaining));
+      });
+    }
+    return true;
+  }
+
   async getCloudStorage(
     keys: readonly string[] = [],
     fallback: Readonly<Record<string, string>> = {},
   ): Promise<ToyBridgeResult<Record<string, string>>> {
     const safeFallback = isStringRecord(fallback) ? cloneStringRecord(fallback) : {};
-    if (!Array.isArray(keys) || keys.some((key) => typeof key !== "string")) {
+    if (!Array.isArray(keys) || !validCloudKeys(keys)) {
       return this.fail("getCloudStorage", safeFallback, "invalid-input");
     }
 
@@ -164,7 +233,10 @@ export class ToyBridgeClient {
       safeFallback,
     );
     if (!result.ok) return result;
-    if (!isStringRecord(result.value)) {
+    if (
+      !isStringRecord(result.value) ||
+      !validCloudKeys(Object.keys(result.value))
+    ) {
       return this.fail("getCloudStorage", safeFallback, "invalid-response");
     }
     return { ok: true, value: cloneStringRecord(result.value) };
@@ -173,12 +245,28 @@ export class ToyBridgeClient {
   async setCloudStorage(
     items: Readonly<Record<string, string>>,
   ): Promise<ToyBridgeResult<boolean>> {
-    if (!isStringRecord(items)) {
+    if (!isStringRecord(items) || !validCloudWrite(items)) {
       return this.fail("setCloudStorage", false, "invalid-input");
     }
-    const result = await this.invoke(
+    const result = await this.invokeCloudMutation(
       "setCloudStorage",
       [cloneStringRecord(items)],
+      false,
+    );
+    return result.ok ? { ok: true, value: true } : result;
+  }
+
+  async removeCloudStorage(
+    keys: readonly string[],
+  ): Promise<ToyBridgeResult<boolean>> {
+    if (!Array.isArray(keys) || !validCloudKeys(keys)) {
+      return this.fail("removeCloudStorage", false, "invalid-input");
+    }
+    const uniqueKeys = [...new Set(keys)];
+    if (uniqueKeys.length === 0) return { ok: true, value: true };
+    const result = await this.invokeCloudMutation(
+      "removeCloudStorage",
+      [uniqueKeys],
       false,
     );
     return result.ok ? { ok: true, value: true } : result;
@@ -232,8 +320,98 @@ export class ToyBridgeClient {
     }
   }
 
+  /**
+   * Serializes host storage mutations without confusing a public timeout with
+   * actual host settlement. If a timed-out host call never settles, the lane
+   * intentionally remains closed; queued callers time out without invoking
+   * the SDK, so a late old write can never overtake a newer one.
+   */
+  private async invokeCloudMutation<T>(
+    operation: "setCloudStorage" | "removeCloudStorage",
+    args: unknown[],
+    fallback: T,
+  ): Promise<ToyBridgeInvocation<T>> {
+    return await new Promise<ToyBridgeInvocation<T>>((resolve) => {
+      let publicSettled = false;
+      let expired = false;
+      const complete = (result: ToyBridgeInvocation<T>) => {
+        if (publicSettled) return;
+        publicSettled = true;
+        clearTimeout(timer);
+        resolve(result);
+      };
+      const timer = setTimeout(() => {
+        expired = true;
+        const error = new ToyBridgeTimeoutError(operation, this.timeoutMs);
+        complete(this.fail(operation, fallback, "timeout", error));
+      }, this.timeoutMs);
+
+      const run = async () => {
+        // This request exhausted its public budget while waiting behind an
+        // older host mutation. It must never be invoked later as a stale write.
+        if (expired) return;
+
+        const bridge = this.resolveBridge();
+        if (!bridge) {
+          complete(this.fail(operation, fallback, "unavailable"));
+          return;
+        }
+
+        let method: unknown;
+        try {
+          method = Reflect.get(bridge, operation);
+        } catch (error) {
+          complete(this.fail(operation, fallback, "error", error));
+          return;
+        }
+        if (typeof method !== "function") {
+          complete(this.fail(operation, fallback, "unsupported"));
+          return;
+        }
+
+        try {
+          // Deliberately await the raw host promise even after `complete` has
+          // already returned a timeout to the caller. This is the queue barrier.
+          const value = await Reflect.apply(
+            method as (...parameters: unknown[]) => unknown,
+            bridge,
+            args,
+          );
+          complete({ ok: true, value });
+        } catch (error) {
+          if (!publicSettled) {
+            complete(this.fail(operation, fallback, "error", error));
+          }
+        }
+      };
+
+      const predecessor = this.cloudMutationTail;
+      this.cloudMutationTail = predecessor
+        .then(run, run)
+        .then(
+          () => undefined,
+          () => undefined,
+        );
+    });
+  }
+
+  private hasOperation(operation: ToyBridgeOperation): boolean {
+    const bridge = this.resolveBridge();
+    if (!bridge) return false;
+    try {
+      return typeof Reflect.get(bridge, operation) === "function";
+    } catch {
+      return false;
+    }
+  }
+
   private resolveBridge(): RawToyBridge | null {
-    if (!this.bridge && this.canRedetect) this.bridge = detectToyBridge(this.globalObject);
+    if (this.canRedetect) {
+      // Some hosts first expose a placeholder object and replace it when the
+      // asynchronous SDK finishes loading. Retain a prior working bridge when
+      // the global temporarily disappears, but adopt every newer candidate.
+      this.bridge = detectToyBridge(this.globalObject) ?? this.bridge;
+    }
     return this.bridge;
   }
 

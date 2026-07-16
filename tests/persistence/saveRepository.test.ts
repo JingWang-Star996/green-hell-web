@@ -140,6 +140,33 @@ test("schema/content mismatch is rejected rather than silently loaded", async ()
   );
 });
 
+test("an explicitly accepted legacy content id loads for migration and is rewritten as current", async () => {
+  const kv = new MemoryKV();
+  const legacy = repository(kv, { content: "vertical-slice@legacy" });
+  await legacy.save(firstPayload, { seed: 1, simTick: 12 });
+
+  const current = new SaveRepository<TestPayload>({
+    key: "test.save",
+    schema: 2,
+    content: "vertical-slice@1",
+    acceptedContent: ["vertical-slice@legacy"],
+    device: "current-device",
+    kv,
+    payloadValidator: isTestPayload,
+  });
+  const loaded = await current.load({ allowCloudFallback: false });
+  assert.equal(loaded.ok, true);
+  if (!loaded.ok) return;
+  assert.equal(loaded.envelope.content, "vertical-slice@legacy");
+
+  const rewritten = await current.save(loaded.envelope.payload, {
+    seed: loaded.envelope.seed,
+    simTick: loaded.envelope.simTick,
+  });
+  assert.equal(rewritten.ok, true);
+  if (rewritten.ok) assert.equal(rewritten.envelope.content, "vertical-slice@1");
+});
+
 test("cloud is used only as a fallback when no valid local save exists", async () => {
   const envelope = createSaveEnvelope<TestPayload>({
     schema: 2,
@@ -172,11 +199,11 @@ test("cloud is used only as a fallback when no valid local save exists", async (
   assert.equal(result.envelope.revision, 7);
   assert.deepEqual(result.envelope.payload, secondPayload);
   assert.equal(kv.getItem(saves.key), raw);
-  assert.equal(reads, 1);
+  assert.equal(reads, 2, "cloud fallback also discovers the checkpoint timeline bundle");
 
   const secondLoad = await saves.load();
   assert.equal(secondLoad.ok, true);
-  assert.equal(reads, 1, "valid local save must not wait for cloud");
+  assert.equal(reads, 2, "valid local save must not wait for cloud");
 });
 
 test("clear invalidates an in-flight cloud load before it can restore stale data", async () => {
@@ -208,6 +235,59 @@ test("clear invalidates an in-flight cloud load before it can restore stale data
   const result = await loading;
   assert.equal(result.ok, false);
   assert.equal(kv.getItem(saves.key), null);
+});
+
+test("clear persists a cross-session run floor before an old cloud delete settles", async () => {
+  const kv = new MemoryKV();
+  let releaseRemoval!: () => void;
+  const removalGate = new Promise<void>((resolve) => {
+    releaseRemoval = resolve;
+  });
+  const oldRaw = serializeSaveEnvelope(createSaveEnvelope({
+    schema: 2,
+    content: "vertical-slice@1",
+    runEpoch: 0,
+    revision: 7,
+    device: "old-device",
+    seed: "old-run",
+    simTick: 900,
+    payload: firstPayload,
+  }));
+  const cloudItems: Record<string, string> = { "test.save": oldRaw };
+  const cloud: CloudKV = {
+    async getItems(keys) {
+      return Object.fromEntries(
+        keys.flatMap((key) => cloudItems[key] ? [[key, cloudItems[key]]] : []),
+      );
+    },
+    async setItems(items) {
+      Object.assign(cloudItems, items);
+      return true;
+    },
+    async removeItems() {
+      await removalGate;
+      return false;
+    },
+  };
+
+  const clearingSession = repository(kv, { cloud });
+  const cleared = await clearingSession.clear();
+  assert.equal(cleared.ok, true);
+
+  const immediateRestart = repository(kv, { cloud });
+  const immediateLoad = await immediateRestart.load();
+  assert.equal(immediateLoad.ok, false);
+  if (!immediateLoad.ok) assert.equal(immediateLoad.reason, "not-found");
+  assert.equal(kv.getItem(immediateRestart.key), null);
+
+  releaseRemoval();
+  await clearingSession.whenCloudIdle();
+  assert.equal(clearingSession.getLastCloudIssue()?.code, "cloud-write-failed");
+
+  const restartAfterFailedDelete = repository(kv, { cloud });
+  const laterLoad = await restartAfterFailedDelete.load();
+  assert.equal(laterLoad.ok, false);
+  assert.equal(kv.getItem(restartAfterFailedDelete.key), null);
 });
 
 test("local save resolves while cloud write is still pending", async () => {
@@ -302,6 +382,187 @@ test("refreshFromCloud only replaces local state with a newer valid revision", a
   assert.equal(again.status, "up-to-date");
 });
 
+test("an older local checkpoint never overwrites a fresher Toy cloud revision", async () => {
+  const remoteEnvelope = createSaveEnvelope<TestPayload>({
+    schema: 2,
+    content: "vertical-slice@1",
+    revision: 9,
+    device: "remote-device",
+    seed: 3,
+    simTick: 90,
+    payload: secondPayload,
+  });
+  const remoteRaw = serializeSaveEnvelope(remoteEnvelope);
+  let cloudWrites = 0;
+  const cloud: CloudKV = {
+    async getItems() { return { "test.save": remoteRaw }; },
+    async setItems() { cloudWrites += 1; return true; },
+  };
+  const kv = new MemoryKV();
+  const saves = repository(kv, { cloud });
+
+  const local = await saves.save(firstPayload, { seed: 3, simTick: 20 });
+  assert.equal(local.ok, true, "local durability does not depend on conflict resolution");
+  await saves.whenCloudIdle();
+  assert.equal(cloudWrites, 0);
+  assert.equal(saves.getLastCloudIssue()?.code, "cloud-conflict");
+
+  const refreshed = await saves.refreshFromCloud();
+  assert.equal(refreshed.status, "updated");
+  if (refreshed.status === "updated") assert.deepEqual(refreshed.envelope.payload, secondPayload);
+});
+
+test("simulation progress outranks a higher save revision within the same run epoch", async () => {
+  const kv = new MemoryKV();
+  kv.setItem(
+    "test.save",
+    serializeSaveEnvelope(
+      createSaveEnvelope<TestPayload>({
+        schema: 2,
+        content: "vertical-slice@1",
+        runEpoch: 7,
+        revision: 9,
+        device: "local-device",
+        seed: 3,
+        simTick: 100,
+        payload: firstPayload,
+      }),
+    ),
+  );
+  const remoteRaw = serializeSaveEnvelope(
+    createSaveEnvelope<TestPayload>({
+      schema: 2,
+      content: "vertical-slice@1",
+      runEpoch: 7,
+      revision: 2,
+      device: "remote-device",
+      seed: 3,
+      simTick: 10_000,
+      payload: secondPayload,
+    }),
+  );
+  let cloudWrites = 0;
+  const cloud: CloudKV = {
+    async getItems() {
+      return { "test.save": remoteRaw };
+    },
+    async setItems() {
+      cloudWrites += 1;
+      return true;
+    },
+  };
+  const saves = repository(kv, { cloud });
+
+  const local = await saves.save(firstPayload, { seed: 3, simTick: 101 });
+  assert.equal(local.ok, true);
+  if (local.ok) assert.equal(local.envelope.revision, 10);
+  await saves.whenCloudIdle();
+  assert.equal(cloudWrites, 0);
+  assert.equal(saves.getLastCloudIssue()?.code, "cloud-conflict");
+
+  const refreshed = await saves.refreshFromCloud();
+  assert.equal(refreshed.status, "updated");
+  if (refreshed.status === "updated") {
+    assert.equal(refreshed.envelope.simTick, 10_000);
+    assert.deepEqual(refreshed.envelope.payload, secondPayload);
+  }
+});
+
+test("equal revision and tick with different payload is treated as a cross-device conflict", async () => {
+  const remoteRaw = serializeSaveEnvelope(createSaveEnvelope<TestPayload>({
+    schema: 2,
+    content: "vertical-slice@1",
+    revision: 1,
+    device: "remote-device",
+    seed: 8,
+    simTick: 20,
+    payload: secondPayload,
+  }));
+  let cloudWrites = 0;
+  const saves = repository(new MemoryKV(), {
+    cloud: {
+      async getItems() { return { "test.save": remoteRaw }; },
+      async setItems() { cloudWrites += 1; return true; },
+    },
+  });
+
+  await saves.save(firstPayload, { seed: 8, simTick: 20 });
+  await saves.whenCloudIdle();
+  assert.equal(cloudWrites, 0);
+  assert.equal(saves.getLastCloudIssue()?.code, "cloud-conflict");
+  const refresh = await saves.refreshFromCloud();
+  assert.equal(refresh.status, "updated", "ambiguous ties prefer the existing cloud checkpoint");
+});
+
+test("an explicit new run survives a failed cloud clear and later replaces the old run", async () => {
+  const oldCloudEnvelope = createSaveEnvelope<TestPayload>({
+    schema: 2,
+    content: "vertical-slice@1",
+    revision: 9,
+    device: "old-device",
+    seed: "old-run",
+    simTick: 900,
+    payload: firstPayload,
+  });
+  const cloudItems: Record<string, string> = {
+    "test.save": serializeSaveEnvelope(oldCloudEnvelope),
+  };
+  let writesEnabled = false;
+  const cloud: CloudKV = {
+    async getItems() {
+      return { ...cloudItems };
+    },
+    async setItems(items) {
+      if (!writesEnabled) return false;
+      Object.assign(cloudItems, items);
+      return true;
+    },
+    async removeItems() {
+      return false;
+    },
+  };
+  const kv = new MemoryKV();
+  const firstSession = repository(kv, { cloud });
+
+  await firstSession.clear();
+  const newRunSave = await firstSession.save(secondPayload, {
+    seed: "new-run",
+    simTick: 0,
+  });
+  assert.equal(newRunSave.ok, true);
+  if (!newRunSave.ok) return;
+  assert.ok((newRunSave.envelope.runEpoch ?? 0) > 0);
+  await firstSession.whenCloudIdle();
+  assert.equal(firstSession.getLastCloudIssue()?.code, "cloud-write-failed");
+
+  const restarted = repository(kv, { cloud });
+  const refreshWhileOldCloudSurvives = await restarted.refreshFromCloud();
+  assert.equal(refreshWhileOldCloudSurvives.status, "up-to-date");
+  if (refreshWhileOldCloudSurvives.status === "up-to-date") {
+    assert.deepEqual(refreshWhileOldCloudSurvives.envelope.payload, secondPayload);
+    assert.equal(refreshWhileOldCloudSurvives.envelope.seed, "new-run");
+  }
+
+  writesEnabled = true;
+  await restarted.save(secondPayload, { seed: "new-run", simTick: 1 });
+  await restarted.whenCloudIdle();
+  const replacedCloud = parseSaveEnvelope<TestPayload>(cloudItems["test.save"], {
+    schema: 2,
+    content: "vertical-slice@1",
+    payloadValidator: isTestPayload,
+  });
+  assert.equal(replacedCloud.ok, true);
+  if (replacedCloud.ok) {
+    assert.equal(replacedCloud.envelope.seed, "new-run");
+    assert.deepEqual(replacedCloud.envelope.payload, secondPayload);
+    assert.equal(
+      replacedCloud.envelope.runEpoch,
+      newRunSave.envelope.runEpoch,
+      "every checkpoint in one run keeps the same epoch",
+    );
+  }
+});
+
 test("clear removes primary, backup, and quarantine before scheduling cloud clear", async () => {
   const removed: string[][] = [];
   const cloud: CloudKV = {
@@ -321,6 +582,26 @@ test("clear removes primary, backup, and quarantine before scheduling cloud clea
   await saves.save(firstPayload, { seed: 1, simTick: 1 });
   await saves.save(secondPayload, { seed: 1, simTick: 2 });
   kv.setItem(saves.corruptKey, "broken");
+  assert.equal(saves.saveAutoCheckpoint(
+    firstPayload,
+    { seed: 1, simTick: 3 },
+    {
+      reason: "rest-before",
+      createdAt: 1,
+      gameDay: 1,
+      minuteOfDay: 500,
+      elapsedSeconds: 10,
+      objectiveLabel: "old run",
+      position: { x: 0, z: 0 },
+      biomeLabel: "forest",
+      health: 100,
+      majorStatuses: [],
+      storm: false,
+      combat: false,
+      danger: false,
+      safety: "safe",
+    },
+  ).ok, true);
   await saves.whenCloudIdle();
 
   const result = await saves.clear();
@@ -329,8 +610,13 @@ test("clear removes primary, backup, and quarantine before scheduling cloud clea
   assert.equal(kv.getItem(saves.key), null);
   assert.equal(kv.getItem(saves.backupKey), null);
   assert.equal(kv.getItem(saves.corruptKey), null);
+  assert.deepEqual(saves.listCheckpoints().entries, []);
   await saves.whenCloudIdle();
-  assert.deepEqual(removed, [[saves.key, saves.backupKey]]);
+  assert.deepEqual(removed, [[
+    saves.key,
+    saves.backupKey,
+    saves.checkpointCloudKey,
+  ]]);
 });
 
 test("local storage failure is surfaced and cloud write is not scheduled", async () => {

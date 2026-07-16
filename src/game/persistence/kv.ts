@@ -4,6 +4,13 @@ export interface KVStore {
   removeItem(key: string): void;
 }
 
+export type KVStorageDurability = "persistent" | "ephemeral";
+
+export interface KVStoreSelection {
+  kv: KVStore;
+  durability: KVStorageDurability;
+}
+
 function isObject(value: unknown): value is Record<PropertyKey, unknown> {
   return (typeof value === "object" && value !== null) || typeof value === "function";
 }
@@ -21,7 +28,20 @@ export function detectBrowserKV(globalObject: unknown = globalThis): KVStore | n
     ) {
       return null;
     }
-    return candidate as unknown as KVStore;
+    const store = candidate as unknown as KVStore;
+    // Merely exposing localStorage is not enough: private/embedded browser
+    // modes may provide the API while every write throws. Probe one reversible
+    // value so the UI can honestly distinguish durable from session-only data.
+    const probeKey = "__canopy_local_storage_probe_v1__";
+    const previous = store.getItem(probeKey);
+    try {
+      store.setItem(probeKey, "ok");
+      if (store.getItem(probeKey) !== "ok") return null;
+    } finally {
+      if (previous === null) store.removeItem(probeKey);
+      else store.setItem(probeKey, previous);
+    }
+    return store;
   } catch {
     return null;
   }
@@ -57,5 +77,19 @@ export class MemoryKV implements KVStore {
 }
 
 export function createDefaultKV(globalObject: unknown = globalThis): KVStore {
-  return detectBrowserKV(globalObject) ?? new MemoryKV();
+  return createDefaultKVSelection(globalObject).kv;
+}
+
+/**
+ * Returns both the storage implementation and whether it can survive a page
+ * reload. The previous silent MemoryKV fallback made a session-only save look
+ * locally durable to the player.
+ */
+export function createDefaultKVSelection(
+  globalObject: unknown = globalThis,
+): KVStoreSelection {
+  const browser = detectBrowserKV(globalObject);
+  return browser
+    ? { kv: browser, durability: "persistent" }
+    : { kv: new MemoryKV(), durability: "ephemeral" };
 }

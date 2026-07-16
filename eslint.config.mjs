@@ -10,6 +10,8 @@ export default defineConfig([
     ".vinext/**",
     "dist/**",
     "out/**",
+    "toy-out/**",
+    ".toy-smoke/**",
     "node_modules.failed/**",
     "next-env.d.ts",
   ]),

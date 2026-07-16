@@ -1,10 +1,20 @@
+import { useState } from "react";
+
+import {
+  CANONICAL_PLAYER_WIKI_URL,
+  GAME_RELEASE_NOTES,
+  LATEST_GAME_RELEASE,
+} from "../releaseNotes";
+
 type StartScreenProps = {
+  saveDiscoveryComplete: boolean;
   canContinue: boolean;
   onNewGame: () => void;
   onContinue: () => void;
 };
 
-export function StartScreen({ canContinue, onNewGame, onContinue }: StartScreenProps) {
+export function StartScreen({ saveDiscoveryComplete, canContinue, onNewGame, onContinue }: StartScreenProps) {
+  const [confirmNewGame, setConfirmNewGame] = useState(false);
   return (
     <section className="start-screen" aria-labelledby="game-title">
       <div className="start-atmosphere" aria-hidden="true">
@@ -24,13 +34,79 @@ export function StartScreen({ canContinue, onNewGame, onContinue }: StartScreenP
           再带着电池活着回到营地。
         </p>
         <div className="start-actions">
-          <button className="button-primary" onClick={onNewGame}>开始新远征 <span>→</span></button>
-          {canContinue && <button className="button-ghost" onClick={onContinue}>继续自动存档</button>}
+          <button className="button-primary" disabled={!saveDiscoveryComplete} onClick={() => canContinue ? setConfirmNewGame(true) : onNewGame()}>
+            {saveDiscoveryComplete ? "开始新远征" : "正在检查存档…"} <span>→</span>
+          </button>
+          {canContinue && (
+            <button
+              className="button-ghost"
+              disabled={!saveDiscoveryComplete}
+              aria-busy={!saveDiscoveryComplete}
+              onClick={onContinue}
+            >
+              {saveDiscoveryComplete ? "继续最近存档" : "正在核对 Toy 云存档…"}
+            </button>
+          )}
         </div>
+        <nav className="start-utility-actions" aria-label="更新与玩家资料">
+          <details className="start-release-notes">
+            <summary>
+              <span>更新公告</span>
+              <small>{LATEST_GAME_RELEASE.buildId}</small>
+            </summary>
+            <div className="start-release-panel">
+              <header>
+                <div>
+                  <small>CANOPY RELEASE LOG</small>
+                  <strong>雨林更新记录</strong>
+                </div>
+                <span>{GAME_RELEASE_NOTES.length} 个版本</span>
+              </header>
+              <div className="start-release-list">
+                {GAME_RELEASE_NOTES.map((release, index) => (
+                  <article className="start-release-entry" key={release.buildId} aria-current={index === 0 ? "true" : undefined}>
+                    <div className="start-release-meta">
+                      <strong>{release.buildId}</strong>
+                      <time dateTime={release.date}>{release.date}</time>
+                      {index === 0 && (
+                        <span>{release.status === "candidate" ? "候选构建" : "当前版本"}</span>
+                      )}
+                    </div>
+                    <h2>{release.title}</h2>
+                    <ul>
+                      {release.changes.map((change) => (
+                        <li key={`${release.buildId}:${change.category}:${change.text}`}>
+                          <b>{change.category}</b>
+                          <span>{change.text}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </article>
+                ))}
+              </div>
+            </div>
+          </details>
+          <a
+            className="start-wiki-link"
+            href={CANONICAL_PLAYER_WIKI_URL}
+            target="_top"
+            rel="noopener noreferrer"
+          >
+            <span>玩家 Wiki</span><small>生存档案 ↗</small>
+          </a>
+        </nav>
+        {confirmNewGame && (
+          <div className="start-save-confirm" role="alert">
+            <strong>要覆盖现有进度吗？</strong>
+            <p>确认后会删除本地的主存档、备份与损坏隔离副本，并用新进度覆盖 Toy 云存档。配方知识仍会保留。</p>
+            <div><button className="button-danger" onClick={onNewGame}>删除并开始</button><button className="button-ghost" onClick={() => setConfirmNewGame(false)}>取消</button></div>
+          </div>
+        )}
         <div className="control-primer" aria-label="基本操作">
           <div><kbd>WASD</kbd><span>移动</span></div>
           <div><kbd>鼠标</kbd><span>观察</span></div>
           <div><kbd>E</kbd><span>互动</span></div>
+          <div><kbd>1–5</kbd><span>装备工具</span></div>
           <div><kbd>Tab</kbd><span>背包</span></div>
           <div><kbd>B</kbd><span>检查身体</span></div>
           <div><kbd>F</kbd><span>抬起手表</span></div>

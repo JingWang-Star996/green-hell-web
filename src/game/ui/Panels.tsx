@@ -1,17 +1,49 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  MANUAL_CHECKPOINT_SLOTS,
+  saveStatusLabel,
+  type CheckpointSlotId,
+  type CheckpointTimelineEntry,
+  type ManualCheckpointSlotId,
+  type SaveStatus,
+} from "../persistence";
+import {
+  SaveTransferControls,
+  type SaveTransferState,
+} from "./SaveTransferControls";
+import { UI_SCALE_MAX, UI_SCALE_MIN, UI_SCALE_STEP } from "./uiSettings";
+import {
+  CRAFTING_SECTION_LABELS,
+  CRAFTING_SECTION_IDS,
+  craftingActionPolicy,
+  groupCraftingRecipes,
+  type CraftingSectionId,
+} from "./actionUx";
+import {
+  createInventoryFilterOptions,
+  groupInventoryItems,
+  INVENTORY_SECTION_LABELS,
+  inventorySectionForItem,
+  isUrgentInventoryItem,
+  type InventoryFilterId,
+} from "./inventoryOrganization";
+import { PANEL_IDS } from "./types";
 import type {
   BodyView,
   EventView,
   InventoryItemView,
+  MapChunkView,
   MapLandmark,
   ObjectiveView,
   PanelId,
+  RecipeRequirementView,
   RecipeView,
   WatchView,
 } from "./types";
 
 type PanelsProps = {
   active: PanelId | null;
+  feedback: ReactNode;
   watch: WatchView;
   inventory: InventoryItemView[];
   recipes: RecipeView[];
@@ -19,27 +51,95 @@ type PanelsProps = {
   objectives: ObjectiveView[];
   events: EventView[];
   landmarks: MapLandmark[];
+  mapChunks: MapChunkView[];
   score: number;
   audioEnabled: boolean;
   reducedMotion: boolean;
+  uiScale?: number;
+  saveStatus: SaveStatus;
+  saveTransferState?: SaveTransferState;
+  localSaveDurability?: "persistent" | "ephemeral";
+  hasPreImportSave?: boolean;
+  checkpointEntries?: CheckpointTimelineEntry[];
+  recommendedCheckpointSlotId?: CheckpointSlotId | null;
+  manualCheckpointSlot?: ManualCheckpointSlotId | null;
   onClose: () => void;
-  onCraft: (recipeId: string) => void;
+  onOpenPanel?: (panel: PanelId) => void;
+  onCraft: (recipeId: string) => boolean;
   onItemAction: (item: InventoryItemView) => void;
   onTreatWound: () => void;
   onTreatParasites: () => void;
   onResume: () => void;
   onRestart: () => void;
+  onManualSave: () => void;
+  onSaveManualCheckpoint?: (slotId: ManualCheckpointSlotId) => void;
+  onPreviewCheckpoint?: (slotId: CheckpointSlotId) => void;
+  onPrepareSaveExport?: () => void;
+  onSelectSaveImport?: (file: File) => void;
+  onConfirmSaveImport?: () => void;
+  onCancelSaveImport?: () => void;
+  onPreparePreImportRestore?: () => void;
   onToggleAudio: () => void;
   onToggleReducedMotion: () => void;
+  onUiScaleChange?: (value: number) => void;
 };
 
+const PANEL_TITLE_MAP: Record<PanelId, [string, string]> = {
+  watch: ["生物手表", "BIOMETRIC WATCH / F"],
+  inventory: ["野外背包", "FIELD PACK / TAB"],
+  crafting: ["手工制作", "CRAFTING / C"],
+  body: ["身体检查", "BODY INSPECTION / B"],
+  notebook: ["生存笔记", "FIELD NOTES / N"],
+  map: ["防水纸图", "TOPOGRAPHIC MAP / M"],
+  pause: ["远征暂停", "SESSION PAUSED / ESC"],
+};
+
+export const PANEL_FOCUSABLE_SELECTOR = [
+  "button:not([disabled])",
+  "summary",
+  "[href]",
+  "input:not([disabled]):not([type='hidden']):not([tabindex='-1'])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])",
+].join(", ");
+
 export function Panels(props: PanelsProps) {
+  return (
+    <div
+      className={props.active ? "panel-backdrop" : "panel-feedback-host"}
+      role={props.active ? "dialog" : undefined}
+      aria-modal={props.active ? "true" : undefined}
+      aria-labelledby={props.active ? "panel-title" : undefined}
+      onMouseDown={props.active ? props.onClose : undefined}
+    >
+      {props.active && <ActivePanel {...props} active={props.active} />}
+      {props.feedback}
+    </div>
+  );
+}
+
+/**
+ * Rest is a verified asynchronous transaction. Its panel is closed by
+ * GameClient only after the post-rest recovery point and state commit succeed.
+ */
+export function shouldCloseCraftingPanelImmediately(
+  recipeId: string,
+  accepted: boolean,
+): boolean {
+  return (
+    accepted &&
+    recipeId !== "rest" &&
+    craftingActionPolicy(recipeId).closePanel
+  );
+}
+
+function ActivePanel(props: PanelsProps & { active: PanelId }) {
   const dialogRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
-    if (!props.active) return;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const frame = window.requestAnimationFrame(() => {
-      dialogRef.current?.querySelector<HTMLElement>("button:not([disabled]), [href], [tabindex]:not([tabindex='-1'])")?.focus();
+      dialogRef.current?.querySelector<HTMLElement>(PANEL_FOCUSABLE_SELECTOR)?.focus();
     });
     return () => {
       window.cancelAnimationFrame(frame);
@@ -47,65 +147,91 @@ export function Panels(props: PanelsProps) {
     };
   }, [props.active]);
 
-  if (!props.active) return null;
-  const titleMap: Record<PanelId, [string, string]> = {
-    watch: ["生物手表", "BIOMETRIC WATCH / F"],
-    inventory: ["野外背包", "FIELD PACK / TAB"],
-    crafting: ["手工制作", "CRAFTING / C"],
-    body: ["身体检查", "BODY INSPECTION / B"],
-    notebook: ["生存笔记", "FIELD NOTES / N"],
-    map: ["防水纸图", "TOPOGRAPHIC MAP / M"],
-    pause: ["远征暂停", "SESSION PAUSED / ESC"],
-  };
-  const [title, kicker] = titleMap[props.active];
+  const [title, kicker] = PANEL_TITLE_MAP[props.active];
   return (
-    <div className="panel-backdrop" role="presentation" onMouseDown={props.onClose}>
-      <section
-        ref={dialogRef}
-        className={`game-panel panel-${props.active}`}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="panel-title"
-        onMouseDown={(event) => event.stopPropagation()}
-        onKeyDown={(event) => {
-          if (event.key !== "Tab" || !dialogRef.current) return;
-          const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>("button:not([disabled]), [href], [tabindex]:not([tabindex='-1'])"));
-          if (focusable.length === 0) return;
-          const first = focusable[0];
-          const last = focusable[focusable.length - 1];
-          if (event.shiftKey && document.activeElement === first) {
-            event.preventDefault();
-            last.focus();
-          } else if (!event.shiftKey && document.activeElement === last) {
-            event.preventDefault();
-            first.focus();
-          }
-        }}
-      >
-        <header className="panel-header">
-          <div><small>{kicker}</small><h2 id="panel-title">{title}</h2></div>
-          <button className="panel-close" onClick={props.onClose} aria-label="关闭面板">×</button>
-        </header>
-        <div className="panel-body">
-          {props.active === "watch" && <WatchPanel watch={props.watch} />}
-          {props.active === "inventory" && <InventoryPanel items={props.inventory} onAction={props.onItemAction} />}
-          {props.active === "crafting" && <CraftingPanel recipes={props.recipes} onCraft={props.onCraft} />}
-          {props.active === "body" && <BodyPanel body={props.body} onTreatWound={props.onTreatWound} onTreatParasites={props.onTreatParasites} />}
-          {props.active === "notebook" && <NotebookPanel objectives={props.objectives} events={props.events} score={props.score} />}
-          {props.active === "map" && <MapPanel landmarks={props.landmarks} coordinates={props.watch.coordinates} />}
-          {props.active === "pause" && (
-            <PausePanel
-              audioEnabled={props.audioEnabled}
-              reducedMotion={props.reducedMotion}
-              onResume={props.onResume}
-              onRestart={props.onRestart}
-              onToggleAudio={props.onToggleAudio}
-              onToggleReducedMotion={props.onToggleReducedMotion}
-            />
-          )}
-        </div>
-      </section>
-    </div>
+    <section
+      ref={dialogRef}
+      className={`game-panel panel-${props.active}`}
+      onMouseDown={(event) => event.stopPropagation()}
+      onKeyDown={(event) => {
+        if (event.key !== "Tab" || !dialogRef.current) return;
+        const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(PANEL_FOCUSABLE_SELECTOR));
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }}
+    >
+      <header className="panel-header">
+        <div><small>{kicker}</small><h2 id="panel-title">{title}</h2></div>
+        <button className="panel-close" onClick={props.onClose} aria-label="关闭面板">×</button>
+      </header>
+      {props.onOpenPanel && (
+        <nav className="panel-system-nav" aria-label="切换生存系统">
+          {PANEL_IDS.map((panel) => (
+            <button
+              key={panel}
+              type="button"
+              aria-pressed={props.active === panel}
+              onClick={() => props.active === panel ? props.onClose() : props.onOpenPanel?.(panel)}
+            >
+              {PANEL_TITLE_MAP[panel][0]}
+            </button>
+          ))}
+        </nav>
+      )}
+      <div className="panel-body">
+        {props.active === "watch" && <WatchPanel watch={props.watch} />}
+        {props.active === "inventory" && <InventoryPanel items={props.inventory} onAction={props.onItemAction} />}
+        {props.active === "crafting" && (
+          <CraftingPanel
+            recipes={props.recipes}
+            onCraft={(recipe) => {
+              const accepted = props.onCraft(recipe.id);
+              if (shouldCloseCraftingPanelImmediately(recipe.id, accepted)) {
+                props.onClose();
+              }
+            }}
+          />
+        )}
+        {props.active === "body" && <BodyPanel body={props.body} onTreatWound={props.onTreatWound} onTreatParasites={props.onTreatParasites} />}
+        {props.active === "notebook" && <NotebookPanel objectives={props.objectives} events={props.events} score={props.score} />}
+        {props.active === "map" && <MapPanel landmarks={props.landmarks} chunks={props.mapChunks} coordinates={props.watch.coordinates} biome={props.watch.biome} />}
+        {props.active === "pause" && (
+          <PausePanel
+            audioEnabled={props.audioEnabled}
+            reducedMotion={props.reducedMotion}
+            uiScale={props.uiScale ?? 100}
+            saveStatus={props.saveStatus}
+            saveTransferState={props.saveTransferState ?? { phase: "idle" }}
+            localSaveDurability={props.localSaveDurability ?? "persistent"}
+            hasPreImportSave={props.hasPreImportSave ?? false}
+            checkpointEntries={props.checkpointEntries ?? []}
+            recommendedCheckpointSlotId={props.recommendedCheckpointSlotId ?? null}
+            manualCheckpointSlot={props.manualCheckpointSlot ?? null}
+            onResume={props.onResume}
+            onRestart={props.onRestart}
+            onManualSave={props.onManualSave}
+            onSaveManualCheckpoint={props.onSaveManualCheckpoint ?? (() => undefined)}
+            onPreviewCheckpoint={props.onPreviewCheckpoint ?? (() => undefined)}
+            onPrepareSaveExport={props.onPrepareSaveExport ?? (() => undefined)}
+            onSelectSaveImport={props.onSelectSaveImport ?? (() => undefined)}
+            onConfirmSaveImport={props.onConfirmSaveImport ?? (() => undefined)}
+            onCancelSaveImport={props.onCancelSaveImport ?? (() => undefined)}
+            onPreparePreImportRestore={props.onPreparePreImportRestore ?? (() => undefined)}
+            onToggleAudio={props.onToggleAudio}
+            onToggleReducedMotion={props.onToggleReducedMotion}
+            onUiScaleChange={props.onUiScaleChange ?? (() => undefined)}
+          />
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -114,7 +240,7 @@ function WatchPanel({ watch }: { watch: WatchView }) {
     <div className="watch-layout">
       <div className="watch-face">
         <div className="watch-time"><small>DAY {watch.day}</small><strong>{watch.time}</strong><span>{watch.weather}</span></div>
-        <div className="watch-coordinates"><small>GPS / COMPASS</small><b>{watch.coordinates}</b></div>
+        <div className="watch-coordinates"><small>GPS / COMPASS · {watch.biome}</small><b>{watch.coordinates}</b></div>
         <div className="watch-rain"><i style={{ width: `${watch.rain * 100}%` }} /><span>降雨强度 {Math.round(watch.rain * 100)}%</span></div>
       </div>
       <div className="macro-grid">
@@ -130,41 +256,307 @@ function WatchPanel({ watch }: { watch: WatchView }) {
 }
 
 function InventoryPanel({ items, onAction }: { items: InventoryItemView[]; onAction: (item: InventoryItemView) => void }) {
+  const [selectedFilter, setSelectedFilter] = useState<InventoryFilterId>("all");
   const carried = items.filter((item) => item.count > 0);
+  const filters = createInventoryFilterOptions(items);
+  const activeFilter = filters.some((filter) => filter.id === selectedFilter) ? selectedFilter : "all";
+  const sections = groupInventoryItems(items, activeFilter);
+  const urgentCount = carried.filter(isUrgentInventoryItem).length;
   return (
     <div className="inventory-layout">
-      <div className="inventory-summary"><span>已携带 <b>{carried.length}</b> 类物品</span><small>准备决定你能走多远，也决定你能否回来。</small></div>
-      <div className="inventory-grid">
+      <div className="inventory-summary">
+        <span>已携带 <b>{carried.length}</b> 类物品</span>
+        <small>
+          {urgentCount > 0 ? <><b>{urgentCount}</b> 类补给或状态需要优先查看。</> : "准备决定你能走多远，也决定你能否回来。"}
+        </small>
+      </div>
+
+      <aside className="inventory-quick-equipment" aria-label="快捷装备说明">
+        <span aria-hidden="true">1–3</span>
+        <div>
+          <strong>快捷装备区</strong>
+          <p>装备由底部快捷栏管理；背包内的“装备 / 收起”与快捷栏使用同一状态。</p>
+        </div>
+      </aside>
+
+      {carried.length > 0 && (
+        <nav className="inventory-filters" aria-label="背包物品分类">
+          {filters.map((filter) => (
+            <button
+              key={filter.id}
+              type="button"
+              className={activeFilter === filter.id ? "is-selected" : ""}
+              aria-pressed={activeFilter === filter.id}
+              aria-controls="inventory-filter-results"
+              onClick={() => setSelectedFilter(filter.id)}
+            >
+              <span>{filter.label}</span>
+              <small aria-label={`${filter.count} 类`}>{filter.count}</small>
+            </button>
+          ))}
+        </nav>
+      )}
+
+      <div className="inventory-sections" id="inventory-filter-results" aria-live="polite">
         {carried.length === 0 && <div className="empty-state">背包是空的。先在坠落点附近观察地面。</div>}
-        {carried.map((item) => (
-          <article key={item.id} className={`inventory-item item-${item.category}`}>
-            <span className="item-symbol">{item.label.slice(0, 1)}</span>
-            <div><small>{item.category.toUpperCase()}</small><strong>{item.label}</strong><p>{item.description}</p></div>
-            <b className="item-count">×{item.count}</b>
-            {item.action && <button onClick={() => onAction(item)}>{item.actionLabel ?? "使用"}</button>}
-          </article>
-        ))}
+        {sections.map((section) => {
+          const sectionLabel = INVENTORY_SECTION_LABELS[section.id];
+          return (
+            <section className={`inventory-section inventory-section-${section.id}`} key={section.id} aria-labelledby={`inventory-section-${section.id}`}>
+              <header>
+                <div>
+                  <h3 id={`inventory-section-${section.id}`}>{sectionLabel.title}</h3>
+                  <p>{sectionLabel.description}</p>
+                </div>
+                <span>{section.items.length} 类</span>
+              </header>
+              <div className="inventory-grid">
+                {section.items.map((item) => {
+                  const urgent = isUrgentInventoryItem(item);
+                  return (
+                    <article key={item.id} className={`inventory-item item-${item.category} ${urgent ? "is-urgent" : ""}`}>
+                      <span className="item-symbol" aria-hidden="true">{item.label.slice(0, 1)}</span>
+                      <div>
+                        <small>{INVENTORY_SECTION_LABELS[inventorySectionForItem(item)].title}</small>
+                        <strong>{item.label}</strong>
+                        <p>{item.description}</p>
+                        {item.statusLabel && (
+                          <small className={`item-lifecycle status-${item.statusTone ?? "stable"}`}>
+                            <span>状态</span>{item.statusLabel}
+                          </small>
+                        )}
+                        {item.waterContainer && <WaterContainerLifecycle item={item} />}
+                        {item.durableUnits && item.durableUnits.length > 0 && (
+                          <DurableToolUnits item={item} />
+                        )}
+                        {urgent && <small className="item-priority">优先处理</small>}
+                      </div>
+                      <b className="item-count" aria-label={`数量 ${item.count}`}>×{item.count}</b>
+                      {item.action && (
+                        <button type="button" aria-label={`${item.actionLabel ?? "使用"}${item.label}`} onClick={() => onAction(item)}>
+                          {item.actionLabel ?? "使用"}
+                        </button>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-function CraftingPanel({ recipes, onCraft }: { recipes: RecipeView[]; onCraft: (recipeId: string) => void }) {
+function WaterContainerLifecycle({ item }: { item: InventoryItemView }) {
+  const lifecycle = item.waterContainer;
+  if (!lifecycle) return null;
+  const roleExplanation =
+    lifecycle.role === "container"
+      ? "这里的数量是全部物理椰壳，不只是空壳。"
+      : lifecycle.role === "dirty-water"
+        ? "每份浑浊水正占用一个椰壳；饮用或煮沸会改变占用状态。"
+        : "每份净水正占用一个椰壳；饮用后该椰壳重新变空。";
+
   return (
-    <div className="recipe-grid">
-      <div className="recipe-discovery-note"><b>{recipes.length}</b><span>条知识已写入笔记。观察材料、处理身体问题与经历危险，会揭示新的组合。</span></div>
-      {recipes.map((recipe, index) => (
-        <article key={recipe.id} className={`${recipe.available ? "can-craft" : ""} ${recipe.completed ? "is-complete" : ""}`}>
-          <span className="recipe-number">{String(index + 1).padStart(2, "0")}</span>
-          <div><small>{recipe.completed ? "已完成" : "已记录配方"}</small><h3>{recipe.label}</h3><p>{recipe.description}</p></div>
-          <ul>{recipe.ingredients.map((ingredient) => <li key={ingredient}>{ingredient}</li>)}</ul>
-          <button disabled={!recipe.available || recipe.completed} onClick={() => onCraft(recipe.id)}>
-            {recipe.completed ? "已建造" : recipe.available ? "制作" : recipe.reason ?? "缺少材料"}
-          </button>
-        </article>
-      ))}
+    <aside className="container-lifecycle" aria-label="椰壳容器占用">
+      <strong>同一组物理椰壳</strong>
+      <p>{roleExplanation}</p>
+      <dl>
+        <div><dt>总数</dt><dd>{lifecycle.total}</dd></div>
+        <div><dt>空壳</dt><dd>{lifecycle.empty}</dd></div>
+        <div><dt>装浑浊水</dt><dd>{lifecycle.dirtyWater}</dd></div>
+        <div><dt>装净水</dt><dd>{lifecycle.cleanWater}</dd></div>
+      </dl>
+    </aside>
+  );
+}
+
+function DurableToolUnits({ item }: { item: InventoryItemView }) {
+  const units = item.durableUnits ?? [];
+  return (
+    <div className="durable-unit-group">
+      <small>从上到下按实际消耗顺序</small>
+      <ol aria-label={`${item.label}按实际使用顺序`}>
+        {units.map((unit) => {
+          const roleLabel =
+            unit.role === "equipped"
+              ? "已装备 · 当前使用"
+              : unit.role === "next-use"
+                ? "下次使用 · 当前未装备"
+                : "备用";
+          return (
+            <li
+              key={`${item.id}-${unit.useOrder}`}
+              className={`durable-unit durable-unit-${unit.role} status-${unit.statusTone}`}
+              aria-current={unit.role === "equipped" ? "true" : undefined}
+            >
+              <span>第 {unit.useOrder} 件</span>
+              <b>{roleLabel}</b>
+              <strong>{unit.statusLabel}</strong>
+              <meter
+                min={0}
+                max={unit.maxDurability}
+                low={unit.maxDurability * 0.2}
+                high={unit.maxDurability * 0.5}
+                optimum={unit.maxDurability}
+                value={unit.durability}
+                aria-label={`${item.label}第 ${unit.useOrder} 件，${roleLabel}，${unit.statusLabel}`}
+              />
+            </li>
+          );
+        })}
+      </ol>
     </div>
   );
+}
+
+function CraftingPanel({ recipes, onCraft }: { recipes: RecipeView[]; onCraft: (recipe: RecipeView) => void }) {
+  const groups = groupCraftingRecipes(recipes);
+  const preferredSection = preferredCraftingSection(groups);
+  const [activeSection, setActiveSection] = useState<CraftingSectionId>(preferredSection);
+  const resolvedSection = groups.some((group) => group.id === activeSection)
+    ? activeSection
+    : preferredSection;
+  const activeGroup = groups.find((group) => group.id === resolvedSection) ?? groups[0];
+  const availableCount = recipes.filter((recipe) => recipe.available && !recipe.completed).length;
+  return (
+    <div className="crafting-layout">
+      <div className="recipe-discovery-note">
+        <b>{recipes.length}</b>
+        <span>条知识已写入笔记，其中 {availableCount} 项现在可执行。任务所需与可制作项目会优先显示。</span>
+      </div>
+      <nav className="recipe-section-nav" role="tablist" aria-label="制作分类">
+        {CRAFTING_SECTION_IDS.map((sectionId) => {
+          const group = groups.find((candidate) => candidate.id === sectionId);
+          return (
+            <button
+              key={sectionId}
+              type="button"
+              role="tab"
+              id={`recipe-tab-${sectionId}`}
+              aria-selected={activeGroup?.id === sectionId}
+              aria-controls={group ? `recipe-section-${sectionId}` : undefined}
+              disabled={!group}
+              onClick={() => group && setActiveSection(sectionId)}
+            >
+              <span>{CRAFTING_SECTION_LABELS[sectionId].title}</span>
+              <small>{group?.recipes.length ?? 0}</small>
+            </button>
+          );
+        })}
+      </nav>
+      {activeGroup && (
+        <section
+          className={`recipe-section recipe-section-${activeGroup.id}`}
+          id={`recipe-section-${activeGroup.id}`}
+          role="tabpanel"
+          aria-labelledby={`recipe-tab-${activeGroup.id}`}
+          data-section-id={activeGroup.id}
+        >
+          <header>
+            <small>{String(activeGroup.recipes.length).padStart(2, "0")} ACTIONS</small>
+            <h3>{CRAFTING_SECTION_LABELS[activeGroup.id].title}</h3>
+            <p>{CRAFTING_SECTION_LABELS[activeGroup.id].description}</p>
+          </header>
+          <div className="recipe-grid">
+            {activeGroup.recipes.map((recipe, index) => (
+              <article
+                key={recipe.id}
+                data-recipe-id={recipe.id}
+                className={`${recipe.available ? "can-craft" : ""} ${recipe.completed ? "is-complete" : ""} ${recipe.taskRelevant ? "is-task-relevant" : ""}`}
+              >
+                <span className="recipe-number">{String(index + 1).padStart(2, "0")}</span>
+                <div>
+                  <div className="recipe-card-flags">
+                    <small>{recipe.completed ? "已完成" : "已记录配方"}</small>
+                    {recipe.taskRelevant && <b>当前任务</b>}
+                    {recipe.available && !recipe.completed && <b>现在可做</b>}
+                  </div>
+                  <h3>{recipe.label}</h3>
+                  <p>{recipe.description}</p>
+                  {recipe.statusLabel && <b className="recipe-status">{recipe.statusLabel}</b>}
+                </div>
+                {recipe.requirements?.length ? (
+                  <RecipeRequirements requirements={recipe.requirements} />
+                ) : (
+                  <ul>{recipe.ingredients.map((ingredient) => <li key={ingredient}>{ingredient}</li>)}</ul>
+                )}
+                <button disabled={!recipe.available || recipe.completed} onClick={() => onCraft(recipe)}>
+                  {recipe.completed ? "已建造" : recipe.available ? craftingActionLabel(recipe.id) : recipe.reason ?? "缺少材料"}
+                </button>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function preferredCraftingSection(
+  groups: ReturnType<typeof groupCraftingRecipes>,
+): CraftingSectionId {
+  return groups.find((group) => group.recipes.some((recipe) => recipe.taskRelevant))?.id
+    ?? groups.find((group) => group.recipes.some((recipe) => recipe.available && !recipe.completed))?.id
+    ?? groups[0]?.id
+    ?? "crafting";
+}
+
+function RecipeRequirements({ requirements }: { requirements: RecipeRequirementView[] }) {
+  return (
+    <ul className="recipe-requirements" aria-label="配方需求">
+      {requirements.map((requirement) => {
+        const stateLabel = requirement.kind === "time"
+          ? "耗时"
+          : requirement.satisfied
+            ? requirement.kind === "condition" ? "满足" : "充足"
+            : requirement.kind === "condition" ? "未满足" : "缺少";
+        const countLabel = requirement.current !== undefined && requirement.required !== undefined
+          ? `已有 ${requirement.current} / 所需 ${requirement.required}${requirement.kind === "tool" ? " · 工具不消耗" : ""}`
+          : requirement.statusLabel ?? stateLabel;
+        const content = (
+          <>
+            <span className="recipe-requirement-heading">
+              <b>{requirement.label}</b>
+              <em>{stateLabel}</em>
+            </span>
+            <span className="recipe-requirement-count">{countLabel}</span>
+          </>
+        );
+        const canRevealHint = !requirement.satisfied && Boolean(requirement.acquisitionHint);
+        return (
+          <li
+            key={requirement.id}
+            className={`recipe-requirement requirement-${requirement.satisfied ? "ready" : "missing"} requirement-${requirement.kind}`}
+          >
+            {canRevealHint ? (
+              <details>
+                <summary>
+                  {content}
+                  <span className="recipe-requirement-hint-action">查看获取提示</span>
+                </summary>
+                <p>{requirement.acquisitionHint}</p>
+              </details>
+            ) : (
+              <div>{content}</div>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function craftingActionLabel(recipeId: string): string {
+  if (recipeId === "rest") return "休息";
+  if (recipeId === "add-fuel") return "添柴";
+  if (recipeId === "boil-water") return "煮沸";
+  if (recipeId === "collect-rainwater") return "接取雨水";
+  if (["campfire", "shelter", "bed", "smoking-rack", "rain-collector", "torch-waymark"].includes(recipeId)) return "搭建";
+  if (recipeId === "radio-beacon") return "修复";
+  return "制作";
 }
 
 function BodyPanel({ body, onTreatWound, onTreatParasites }: { body: BodyView; onTreatWound: () => void; onTreatParasites: () => void }) {
@@ -201,7 +593,7 @@ function NotebookPanel({ objectives, events, score }: { objectives: ObjectiveVie
     <div className="notebook-layout">
       <section><small className="section-kicker">目标链</small><div className="notebook-objectives">
         {objectives.map((objective, index) => <article key={objective.id} className={`${objective.completed ? "done" : ""} ${objective.current ? "current" : ""}`}>
-          <span>{objective.completed ? "✓" : String(index + 1).padStart(2, "0")}</span><div><strong>{objective.label}</strong><p>{objective.description}</p></div>
+          <span>{objective.completed ? "✓" : String(index + 1).padStart(2, "0")}</span><div><strong>{objective.label}</strong><p>{objective.progressLabel && <><b>{objective.progressLabel}</b><br /></>}{objective.description}{objective.blocker && <><br /><b>阻断条件：{objective.blocker}</b></>}</p>{objective.steps && <ol className="objective-fact-steps">{objective.steps.map((step) => <li key={step.id} className={step.completed ? "done" : ""}>{step.completed ? "✓" : "○"} {step.label}</li>)}</ol>}</div>
         </article>)}
       </div></section>
       <section><small className="section-kicker">因果日志 · 生存评分 {score}</small><div className="field-log">
@@ -211,34 +603,403 @@ function NotebookPanel({ objectives, events, score }: { objectives: ObjectiveVie
   );
 }
 
-function MapPanel({ landmarks, coordinates }: { landmarks: MapLandmark[]; coordinates: string }) {
+function MapPanel({ landmarks, chunks, coordinates, biome }: { landmarks: MapLandmark[]; chunks: MapChunkView[]; coordinates: string; biome: string }) {
+  const xValues = chunks.map((chunk) => chunk.x);
+  const zValues = chunks.map((chunk) => chunk.z);
+  const minX = Math.min(...xValues);
+  const maxX = Math.max(...xValues);
+  const minZ = Math.min(...zValues);
+  const maxZ = Math.max(...zValues);
+  const width = Math.max(1, maxX - minX + 1);
+  const height = Math.max(1, maxZ - minZ + 1);
   return (
     <div className="map-layout">
-      <div className="paper-map" aria-label="无玩家定位标记的地形图">
-        <span className="map-river" />
-        <span className="map-ridge" />
+      <div className="paper-map dynamic-map" aria-label={`已经探索 ${chunks.length} 个动态区块的地形图`}>
+        {chunks.map((chunk) => (
+          <span
+            key={chunk.key}
+            className={`map-chunk ${chunk.current ? "is-current" : ""}`}
+            title={`${chunk.biome} · 区块 ${chunk.key}`}
+            style={{
+              left: `${((chunk.x - minX) / width) * 100}%`,
+              top: `${((maxZ - chunk.z) / height) * 100}%`,
+              width: `${100 / width}%`,
+              height: `${100 / height}%`,
+              backgroundColor: chunk.color,
+            }}
+          />
+        ))}
         {landmarks.filter((landmark) => landmark.discovered).map((landmark) => (
-          <i key={landmark.id} className={`map-marker marker-${landmark.kind}`} style={{ left: `${((landmark.x + 54) / 108) * 100}%`, top: `${((54 - landmark.z) / 108) * 100}%` }}>
+          <i key={landmark.id} className={`map-marker marker-${landmark.kind}`} style={{ left: `${((landmark.x / 48 - minX) / width) * 100}%`, top: `${((maxZ + 1 - landmark.z / 48) / height) * 100}%` }}>
             <b>{landmark.kind === "camp" ? "⌂" : landmark.kind === "water" ? "≈" : "×"}</b><em>{landmark.label}</em>
           </i>
         ))}
-        <small className="map-note">地图不会显示你的位置。用手表坐标和地标判断方向。</small>
+        <small className="map-note">亮框表示当前 48m 区块；纸图会随探索向外扩展，标记仍需结合手表坐标判断。</small>
       </div>
-      <aside><small>手表坐标</small><strong>{coordinates}</strong><p>坠落点约在图中央。溪流位于南侧低地，气象站在东北山脊。</p><p className="pencil-note">“短路穿过蛇草坡，长路沿溪走。听见嘶声就停。”</p></aside>
+      <aside><small>手表坐标 · 当前生态</small><strong>{coordinates}</strong><p>{biome} · 已勘测 {chunks.length} 个区块。越过区块边界后，地形、资源承载力和动物种群会按世界种子继续生成。</p><p className="pencil-note">“把返程路线当作资源。食物会坏，工具会损耗，天气会改变安全路径。”</p></aside>
     </div>
   );
 }
 
-function PausePanel({ audioEnabled, reducedMotion, onResume, onRestart, onToggleAudio, onToggleReducedMotion }: {
-  audioEnabled: boolean; reducedMotion: boolean; onResume: () => void; onRestart: () => void; onToggleAudio: () => void; onToggleReducedMotion: () => void;
+export const PAUSE_SECTION_IDS = ["overview", "saves", "settings", "session"] as const;
+type PauseSectionId = (typeof PAUSE_SECTION_IDS)[number];
+
+const PAUSE_SECTION_LABELS: Record<PauseSectionId, string> = {
+  overview: "总览",
+  saves: "存档与恢复",
+  settings: "显示与声音",
+  session: "本局管理",
+};
+
+function PausePanel({ audioEnabled, reducedMotion, uiScale, saveStatus, saveTransferState, localSaveDurability, hasPreImportSave, checkpointEntries, recommendedCheckpointSlotId, manualCheckpointSlot, onResume, onRestart, onManualSave, onSaveManualCheckpoint, onPreviewCheckpoint, onPrepareSaveExport, onSelectSaveImport, onConfirmSaveImport, onCancelSaveImport, onPreparePreImportRestore, onToggleAudio, onToggleReducedMotion, onUiScaleChange }: {
+  audioEnabled: boolean; reducedMotion: boolean; uiScale: number; saveStatus: SaveStatus; saveTransferState: SaveTransferState; localSaveDurability: "persistent" | "ephemeral"; hasPreImportSave: boolean; checkpointEntries: CheckpointTimelineEntry[]; recommendedCheckpointSlotId: CheckpointSlotId | null; manualCheckpointSlot: ManualCheckpointSlotId | null; onResume: () => void; onRestart: () => void; onManualSave: () => void; onSaveManualCheckpoint: (slotId: ManualCheckpointSlotId) => void; onPreviewCheckpoint: (slotId: CheckpointSlotId) => void; onPrepareSaveExport: () => void; onSelectSaveImport: (file: File) => void; onConfirmSaveImport: () => void; onCancelSaveImport: () => void; onPreparePreImportRestore: () => void; onToggleAudio: () => void; onToggleReducedMotion: () => void; onUiScaleChange: (value: number) => void;
 }) {
-  return (
-    <div className="pause-layout">
-      <p>时间已经停下。返回后先确认方向和当前最危险的问题。</p>
-      <button className="button-primary full-width" onClick={onResume}>返回雨林</button>
-      <button className="setting-row" onClick={onToggleAudio}><span>环境音与提示音</span><b>{audioEnabled ? "开启" : "关闭"}</b></button>
-      <button className="setting-row" onClick={onToggleReducedMotion}><span>减弱镜头与粒子运动</span><b>{reducedMotion ? "开启" : "关闭"}</b></button>
-      <button className="button-danger full-width" onClick={onRestart}>放弃本局并重新开始</button>
+  const pauseTabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const [activeSection, setActiveSection] = useState<PauseSectionId>("overview");
+  const [confirmRestart, setConfirmRestart] = useState(false);
+  const savedTime = saveStatus.savedAt
+    ? new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(saveStatus.savedAt)
+    : null;
+  const saveCard = (
+    <div className={`pause-save-card save-phase-${saveStatus.phase}`} role="status" aria-live="polite">
+      <div>
+        <span>{saveStatusLabel(saveStatus)}</span>
+        {savedTime && <small>最近保存 {savedTime}</small>}
+      </div>
+      <button className="button-ghost" disabled={saveStatus.phase === "saving"} onClick={onManualSave}>
+        保存当前活动档
+      </button>
     </div>
   );
+  const selectSection = (section: PauseSectionId, moveFocus = false) => {
+    setActiveSection(section);
+    if (section !== "session") setConfirmRestart(false);
+    if (moveFocus) {
+      pauseTabRefs.current[PAUSE_SECTION_IDS.indexOf(section)]?.focus();
+    }
+  };
+  return (
+    <div className="pause-layout">
+      <section className="pause-hero" aria-label="暂停状态">
+        <div>
+          <small>游戏已暂停</small>
+          <strong>雨林中的时间已经停下</strong>
+          <p>返回前先确认方向、身体状态和眼前最危险的问题。</p>
+        </div>
+        <button className="button-primary" onClick={onResume}>返回雨林</button>
+      </section>
+
+      <nav
+        className="pause-section-nav"
+        role="tablist"
+        aria-label="暂停菜单分类"
+        onKeyDown={(event) => {
+          const currentIndex = PAUSE_SECTION_IDS.indexOf(activeSection);
+          let nextIndex = currentIndex;
+          if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+            nextIndex = (currentIndex + 1) % PAUSE_SECTION_IDS.length;
+          } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+            nextIndex = (currentIndex - 1 + PAUSE_SECTION_IDS.length) % PAUSE_SECTION_IDS.length;
+          } else if (event.key === "Home") {
+            nextIndex = 0;
+          } else if (event.key === "End") {
+            nextIndex = PAUSE_SECTION_IDS.length - 1;
+          } else {
+            return;
+          }
+          event.preventDefault();
+          selectSection(PAUSE_SECTION_IDS[nextIndex], true);
+        }}
+      >
+        {PAUSE_SECTION_IDS.map((section, index) => (
+          <button
+            key={section}
+            ref={(node) => { pauseTabRefs.current[index] = node; }}
+            id={`pause-tab-${section}`}
+            type="button"
+            role="tab"
+            aria-selected={activeSection === section}
+            aria-controls={`pause-section-${section}`}
+            tabIndex={activeSection === section ? 0 : -1}
+            onClick={() => selectSection(section)}
+          >
+            {PAUSE_SECTION_LABELS[section]}
+          </button>
+        ))}
+      </nav>
+
+      <section
+        id={`pause-section-${activeSection}`}
+        className={`pause-section-content pause-section-${activeSection}`}
+        role="tabpanel"
+        aria-labelledby={`pause-tab-${activeSection}`}
+      >
+        {activeSection === "overview" && (
+          <div className="pause-overview-grid">
+            <article className="pause-overview-card">
+              <small>存档状态</small>
+              {saveCard}
+              <p>手动保存写入当前活动档；休息和关键任务仍会轮转自动恢复点。</p>
+            </article>
+            <article className="pause-overview-card">
+              <small>返回前检查</small>
+              <strong>方向 · 状态 · 天气</strong>
+              <p>确认手表方向、优先处理伤口，再决定继续探索还是返回营地。</p>
+              <button className="button-ghost" type="button" onClick={() => selectSection("settings", true)}>调整界面与声音</button>
+            </article>
+          </div>
+        )}
+
+        {activeSection === "saves" && (
+          <>
+            <header className="pause-section-heading">
+              <div><small>存档与恢复</small><strong>决定从哪里继续</strong></div>
+              <p>手动档不会被自动轮转覆盖；导入前会保留一份回滚副本。</p>
+            </header>
+            {saveCard}
+            <CheckpointTimelinePanel
+              entries={checkpointEntries}
+              recommendedSlotId={recommendedCheckpointSlotId}
+              busyManualSlot={manualCheckpointSlot}
+              mode="manage"
+              onSaveManual={onSaveManualCheckpoint}
+              onSelect={onPreviewCheckpoint}
+            />
+            <SaveTransferControls
+              localDurability={localSaveDurability}
+              state={saveTransferState}
+              hasPreImport={hasPreImportSave}
+              onPrepareExport={onPrepareSaveExport}
+              onSelectImport={onSelectSaveImport}
+              onConfirmImport={onConfirmSaveImport}
+              onCancelImport={onCancelSaveImport}
+              onPreparePreImportRestore={onPreparePreImportRestore}
+            />
+          </>
+        )}
+
+        {activeSection === "settings" && (
+          <>
+            <header className="pause-section-heading">
+              <div><small>显示与声音</small><strong>让信息保持清楚但不过载</strong></div>
+              <p>这些选项只影响当前设备，不会改变游戏进度。</p>
+            </header>
+            <button className="setting-row" onClick={onToggleAudio}><span>环境音与提示音</span><b>{audioEnabled ? "开启" : "关闭"}</b></button>
+            <button className="setting-row" onClick={onToggleReducedMotion}><span>减弱镜头与粒子运动</span><b>{reducedMotion ? "开启" : "关闭"}</b></button>
+            <div className="setting-range-row">
+              <div><label htmlFor="ui-scale-range">UI 控件大小</label><output htmlFor="ui-scale-range">{uiScale}%</output></div>
+              <input
+                id="ui-scale-range"
+                type="range"
+                min={UI_SCALE_MIN}
+                max={UI_SCALE_MAX}
+                step={UI_SCALE_STEP}
+                value={uiScale}
+                aria-valuetext={`${uiScale}%`}
+                onChange={(event) => onUiScaleChange(Number(event.currentTarget.value))}
+              />
+              <small>只保存在当前设备；不会改变画面分辨率、操作灵敏度或游戏存档。</small>
+            </div>
+          </>
+        )}
+
+        {activeSection === "session" && (
+          <section className="pause-danger-zone" aria-label="本局管理">
+            <small>危险操作</small>
+            <strong>放弃当前生存进度</strong>
+            <p>只有确认开始新游戏时才会清除本地主存档、备份和恢复点。配方知识会保留。</p>
+            {!confirmRestart ? (
+              <button className="button-danger full-width" onClick={() => setConfirmRestart(true)}>放弃本局并重新开始</button>
+            ) : (
+              <div className="save-reset-confirm" role="alert">
+                <p>新游戏会删除本地的主存档、备份与损坏隔离副本，并用新进度覆盖 Toy 云存档。已解锁的配方知识会保留。</p>
+                <div><button className="button-danger" onClick={onRestart}>确认删除并开始</button><button className="button-ghost" onClick={() => setConfirmRestart(false)}>取消</button></div>
+              </div>
+            )}
+          </section>
+        )}
+      </section>
+    </div>
+  );
+}
+
+export function CheckpointTimelinePanel({
+  entries,
+  recommendedSlotId,
+  selectedSlotId = null,
+  busyManualSlot = null,
+  mode = "recover",
+  onSaveManual,
+  onSelect,
+}: {
+  entries: readonly CheckpointTimelineEntry[];
+  recommendedSlotId: CheckpointSlotId | null;
+  selectedSlotId?: CheckpointSlotId | null;
+  busyManualSlot?: ManualCheckpointSlotId | null;
+  mode?: "manage" | "recover";
+  onSaveManual?: (slotId: ManualCheckpointSlotId) => void;
+  onSelect: (slotId: CheckpointSlotId) => void;
+}) {
+  const sortedEntries = [...entries].sort((left, right) => right.sequence - left.sequence);
+  const bySlot = new Map(sortedEntries.map((entry) => [entry.slotId, entry]));
+  return (
+    <section className={`checkpoint-timeline checkpoint-mode-${mode}`} aria-label="恢复点时间线">
+      <header>
+        <div>
+          <strong>恢复点时间线</strong>
+          <small>手动档独立保留；自动档轮转且不会覆盖手动档</small>
+        </div>
+        <span>{sortedEntries.length} 个已校验</span>
+      </header>
+      {mode === "manage" && onSaveManual && (
+        <div className="checkpoint-manual-slots" aria-label="手动恢复点槽位">
+          {MANUAL_CHECKPOINT_SLOTS.map((slotId, index) => {
+            const occupied = bySlot.get(slotId);
+            return (
+              <button
+                key={slotId}
+                className="button-ghost"
+                disabled={busyManualSlot !== null}
+                aria-busy={busyManualSlot === slotId}
+                onClick={() => onSaveManual(slotId)}
+              >
+                {busyManualSlot === slotId
+                  ? `正在写入手动槽 ${index + 1}`
+                  : `${occupied ? "覆盖" : "保存到"}手动槽 ${index + 1}`}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {sortedEntries.length === 0 ? (
+        <p className="checkpoint-empty">还没有可用恢复点。完成任务、休息或保存到手动槽后会出现在这里。</p>
+      ) : (
+        <div className="checkpoint-card-list">
+          {sortedEntries.map((entry) => (
+            <CheckpointCard
+              key={entry.slotId}
+              entry={entry}
+              recommended={entry.slotId === recommendedSlotId}
+              selected={entry.slotId === selectedSlotId}
+              onSelect={onSelect}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CheckpointCard({
+  entry,
+  recommended,
+  selected,
+  onSelect,
+}: {
+  entry: CheckpointTimelineEntry;
+  recommended: boolean;
+  selected: boolean;
+  onSelect: (slotId: CheckpointSlotId) => void;
+}) {
+  const slotLabel = checkpointSlotLabel(entry);
+  const statusLabel = entry.majorStatuses.length > 0
+    ? entry.majorStatuses.map((status) => `${statusSeverityLabel(status.severity)}：${status.label}`).join(" · ")
+    : "无显著状态";
+  const dangerLabels = [
+    entry.storm ? "暴雨" : null,
+    entry.combat ? "交战中" : null,
+    entry.danger ? "危险区" : null,
+  ].filter(Boolean);
+  return (
+    <article className={`checkpoint-card safety-${entry.safety} ${selected ? "is-selected" : ""}`}>
+      <header>
+        <div>
+          <span>{slotLabel}</span>
+          <strong>第 {entry.gameDay} 天 · {formatGameTime(entry.minuteOfDay)}</strong>
+        </div>
+        <div className="checkpoint-card-tags">
+          {recommended && <b>推荐安全点</b>}
+          <i>{checkpointSafetyLabel(entry.safety)}</i>
+        </div>
+      </header>
+      <dl>
+        <div><dt>保存原因</dt><dd>{checkpointReasonLabel(entry.reason)}</dd></div>
+        <div><dt>现实时间</dt><dd>{formatRealTime(entry.createdAt)}</dd></div>
+        <div><dt>游玩时长</dt><dd>{formatElapsed(entry.elapsedSeconds)}</dd></div>
+        <div><dt>地点</dt><dd>{entry.biomeLabel} · X {Math.round(entry.position.x)} / Z {Math.round(entry.position.z)}</dd></div>
+        <div><dt>当前目标</dt><dd>{entry.objectiveLabel}</dd></div>
+        <div><dt>身体状态</dt><dd>生命 {Math.round(entry.health)} · {statusLabel}</dd></div>
+      </dl>
+      {dangerLabels.length > 0 && <p className="checkpoint-danger">保存时：{dangerLabels.join(" · ")}</p>}
+      <footer>
+        <div className="checkpoint-durability" aria-label="存档耐久性与校验状态">
+          <span>{entry.localDurability === "persistent" ? "本地持久" : "本次会话"}</span>
+          <span>{checkpointCloudDurabilityLabel(entry.cloudDurability)}</span>
+          <span>{entry.recoveredFromBackup ? "由同槽备份恢复并校验" : "校验通过"}</span>
+        </div>
+        <button className={recommended ? "button-primary" : "button-ghost"} onClick={() => onSelect(entry.slotId)}>
+          {selected ? "已选择，查看确认" : "预览并选择"}
+        </button>
+      </footer>
+    </article>
+  );
+}
+
+function checkpointSlotLabel(entry: CheckpointTimelineEntry): string {
+  if (entry.kind === "manual") return `手动槽 ${Number(entry.slotId.slice(-1))}`;
+  if (entry.kind === "preimport") return "导入前恢复点";
+  return `自动恢复点 ${Number(entry.slotId.slice(5))}`;
+}
+
+function checkpointReasonLabel(reason: CheckpointTimelineEntry["reason"]): string {
+  const labels: Record<CheckpointTimelineEntry["reason"], string> = {
+    manual: "玩家手动保存",
+    "rest-before": "休息前",
+    "rest-after": "休息结算后",
+    task: "任务阶段完成",
+    milestone: "关键进展",
+    periodic: "周期自动保存",
+    hidden: "切到后台",
+    "page-exit": "离开页面",
+    "new-game": "远征开始",
+    preimport: "导入文件前",
+  };
+  return labels[reason];
+}
+
+function checkpointSafetyLabel(safety: CheckpointTimelineEntry["safety"]): string {
+  return safety === "safe" ? "安全" : safety === "caution" ? "需观察" : "高风险";
+}
+
+function checkpointCloudDurabilityLabel(
+  durability: CheckpointTimelineEntry["cloudDurability"],
+): string {
+  if (durability === "synced") return "Toy 云端已同步";
+  if (durability === "pending") return "Toy 云端同步中";
+  return "仅本地 · 云端未同步";
+}
+
+function statusSeverityLabel(severity: CheckpointTimelineEntry["majorStatuses"][number]["severity"]): string {
+  return severity === "critical" ? "危急" : severity === "warning" ? "警告" : "观察";
+}
+
+function formatGameTime(minuteOfDay: number): string {
+  const minute = Math.max(0, Math.round(minuteOfDay)) % (24 * 60);
+  return `${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`;
+}
+
+function formatRealTime(createdAt: number): string {
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(createdAt);
+}
+
+function formatElapsed(elapsedSeconds: number): string {
+  const totalMinutes = Math.max(0, Math.floor(elapsedSeconds / 60));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours > 0 ? `${hours} 小时 ${minutes} 分` : `${minutes} 分钟`;
 }

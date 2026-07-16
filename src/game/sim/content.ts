@@ -1,16 +1,175 @@
 import type {
+  DurableToolId,
   ItemDefinition,
   ItemId,
+  PerishableItemId,
   RecipeDefinition,
   RecipeId,
+  ResourceRegenerationDefinition,
   TaskDefinition,
   TaskId,
   WorldEntityTemplate,
 } from "./types";
+import { gameHoursToSimulationSeconds } from "./time";
+import {
+  RIVER_GAUGE_ID,
+  RIVER_GAUGE_OBSTRUCTION_ID,
+  RIVER_GAUGE_POSITION,
+  RIVER_RISING_TASK,
+  CANOPY_WIND_TASK,
+} from "./campaignContent";
+import {
+  CANOPY_JUNCTION_ID,
+  CANOPY_JUNCTION_OBSTRUCTION_TREE_ID,
+  CANOPY_JUNCTION_POSITION,
+  CANOPY_JUNCTION_TENSION_VINE_IDS,
+} from "./canopyJunction";
+
+export interface FoodSpoilageDefinition {
+  shelfLifeGameHours: number;
+  shelfLifeSeconds: number;
+}
+
+export interface ToolDurabilityDefinition {
+  maxDurability: number;
+}
+
+export const TORCH_BURN_SEGMENT_GAME_HOURS = 1 / 3;
+export const TORCH_BURN_SEGMENT_SECONDS = gameHoursToSimulationSeconds(
+  TORCH_BURN_SEGMENT_GAME_HOURS,
+);
+export const TORCH_BURN_SEGMENTS = 6;
+
+function foodShelfLife(shelfLifeGameHours: number): FoodSpoilageDefinition {
+  return {
+    shelfLifeGameHours,
+    shelfLifeSeconds: gameHoursToSimulationSeconds(shelfLifeGameHours),
+  };
+}
+
+/**
+ * Inventory food is intentionally useful for more than one short outing.
+ * Fresh larvae last half a game day, fruit a day and a half, and dry nuts four
+ * days. Deadlines remain deterministic simulation ticks once an item is picked.
+ */
+export const FOOD_SPOILAGE: Record<
+  PerishableItemId,
+  FoodSpoilageDefinition
+> = {
+  grubs: foodShelfLife(12),
+  "palm-fruit": foodShelfLife(36),
+  "brazil-nuts": foodShelfLife(96),
+  "raw-meat": foodShelfLife(18),
+  "cooked-meat": foodShelfLife(48),
+  "smoked-meat": foodShelfLife(120),
+};
+
+export const TOOL_DURABILITY: Record<
+  DurableToolId,
+  ToolDurabilityDefinition
+> = {
+  "stone-blade": { maxDurability: 20 },
+  axe: { maxDurability: 36 },
+  "stone-pick": { maxDurability: 32 },
+  spear: { maxDurability: 24 },
+  torch: { maxDurability: TORCH_BURN_SEGMENTS },
+};
+
+/**
+ * Renewable resources use per-node, per-cycle deterministic random windows.
+ * This preserves save/replay determinism without making every known spawn pop
+ * back at the same fixed timestamp. Objective/rare resources are absent.
+ */
+export const RESOURCE_REGENERATION: Partial<
+  Record<ItemId, ResourceRegenerationDefinition>
+> = {
+  stone: {
+    minimumIntervalGameHours: 36,
+    maximumIntervalGameHours: 72,
+    minimumAmount: 1,
+    maximumAmount: 1,
+    minimumPlayerDistance: 42,
+  },
+  stick: {
+    minimumIntervalGameHours: 2,
+    maximumIntervalGameHours: 6,
+    minimumAmount: 1,
+    maximumAmount: 3,
+    minimumPlayerDistance: 36,
+  },
+  vine: {
+    minimumIntervalGameHours: 6,
+    maximumIntervalGameHours: 12,
+    minimumAmount: 1,
+    maximumAmount: 2,
+    minimumPlayerDistance: 36,
+  },
+  "broad-leaf": {
+    minimumIntervalGameHours: 4,
+    maximumIntervalGameHours: 8,
+    minimumAmount: 1,
+    maximumAmount: 2,
+    minimumPlayerDistance: 36,
+  },
+  "medicinal-leaf": {
+    minimumIntervalGameHours: 12,
+    maximumIntervalGameHours: 24,
+    minimumAmount: 1,
+    maximumAmount: 1,
+    minimumPlayerDistance: 42,
+  },
+  "dry-leaf": {
+    // Tinder is a first-night progression material. It still returns through
+    // the Director's hidden/off-screen settlement path, but its ecological
+    // window is shorter than food or medicine so a spent starter supply cannot
+    // soft-lock the campfire loop for most of a game day.
+    minimumIntervalGameHours: 2,
+    maximumIntervalGameHours: 6,
+    minimumAmount: 1,
+    maximumAmount: 2,
+    minimumPlayerDistance: 36,
+  },
+  coconut: {
+    minimumIntervalGameHours: 12,
+    maximumIntervalGameHours: 30,
+    minimumAmount: 1,
+    maximumAmount: 1,
+    minimumPlayerDistance: 42,
+  },
+  "antiparasitic-herb": {
+    minimumIntervalGameHours: 18,
+    maximumIntervalGameHours: 36,
+    minimumAmount: 1,
+    maximumAmount: 1,
+    minimumPlayerDistance: 42,
+  },
+  "palm-fruit": {
+    minimumIntervalGameHours: 8,
+    maximumIntervalGameHours: 18,
+    minimumAmount: 1,
+    maximumAmount: 2,
+    minimumPlayerDistance: 42,
+  },
+  "brazil-nuts": {
+    minimumIntervalGameHours: 24,
+    maximumIntervalGameHours: 48,
+    minimumAmount: 1,
+    maximumAmount: 1,
+    minimumPlayerDistance: 42,
+  },
+  grubs: {
+    minimumIntervalGameHours: 4,
+    maximumIntervalGameHours: 10,
+    minimumAmount: 1,
+    maximumAmount: 2,
+    minimumPlayerDistance: 36,
+  },
+};
 
 export const ITEMS: Record<ItemId, ItemDefinition> = {
-  stone: { id: "stone", label: "锋利石块", stackLimit: 24 },
+  stone: { id: "stone", label: "石块", stackLimit: 24 },
   stick: { id: "stick", label: "木棍", stackLimit: 32 },
+  log: { id: "log", label: "原木", stackLimit: 6 },
   vine: { id: "vine", label: "藤条", stackLimit: 24 },
   "broad-leaf": { id: "broad-leaf", label: "宽叶", stackLimit: 32 },
   "medicinal-leaf": {
@@ -29,6 +188,8 @@ export const ITEMS: Record<ItemId, ItemDefinition> = {
   "clean-water": { id: "clean-water", label: "煮沸净水", stackLimit: 8 },
   "stone-blade": { id: "stone-blade", label: "石刃", stackLimit: 2 },
   axe: { id: "axe", label: "石斧", stackLimit: 2 },
+  "stone-pick": { id: "stone-pick", label: "石镐", stackLimit: 2 },
+  torch: { id: "torch", label: "简易火把", stackLimit: 1 },
   bandage: { id: "bandage", label: "草药绷带", stackLimit: 8 },
   spear: { id: "spear", label: "石矛", stackLimit: 2 },
   battery: { id: "battery", label: "气象站电池", stackLimit: 1 },
@@ -55,6 +216,25 @@ export const ITEMS: Record<ItemId, ItemDefinition> = {
     stackLimit: 10,
     edible: { protein: 22, energy: 4, sanity: -3 },
   },
+  "raw-meat": {
+    id: "raw-meat",
+    label: "生肉",
+    stackLimit: 8,
+    edible: { protein: 28, energy: 2, sanity: -5 },
+  },
+  "cooked-meat": {
+    id: "cooked-meat",
+    label: "烤肉",
+    stackLimit: 8,
+    edible: { protein: 42, fat: 10, energy: 12, sanity: 3 },
+  },
+  "smoked-meat": {
+    id: "smoked-meat",
+    label: "烟熏肉",
+    stackLimit: 8,
+    edible: { protein: 36, fat: 8, energy: 10, sanity: 2 },
+  },
+  hide: { id: "hide", label: "兽皮", stackLimit: 12 },
 };
 
 export const RECIPES: Record<RecipeId, RecipeDefinition> = {
@@ -72,6 +252,21 @@ export const RECIPES: Record<RecipeId, RecipeDefinition> = {
     tools: ["stone-blade"],
     results: { axe: 1 },
     workSeconds: 30,
+  },
+  "stone-pick": {
+    id: "stone-pick",
+    label: "捆扎石镐",
+    ingredients: { stone: 3, stick: 1, vine: 1 },
+    tools: ["stone-blade"],
+    results: { "stone-pick": 1 },
+    workSeconds: 35,
+  },
+  torch: {
+    id: "torch",
+    label: "捆扎简易火把",
+    ingredients: { stick: 1, "dry-leaf": 3, vine: 1 },
+    results: { torch: 1 },
+    workSeconds: 24,
   },
   bandage: {
     id: "bandage",
@@ -93,7 +288,6 @@ export const RECIPES: Record<RecipeId, RecipeDefinition> = {
     label: "搭建营火",
     ingredients: { stick: 4, "dry-leaf": 2 },
     effect: "build-fire",
-    requiresCamp: true,
     workSeconds: 45,
   },
   shelter: {
@@ -102,7 +296,6 @@ export const RECIPES: Record<RecipeId, RecipeDefinition> = {
     ingredients: { stick: 6, vine: 4, "broad-leaf": 4 },
     tools: ["axe"],
     effect: "build-shelter",
-    requiresCamp: true,
     workSeconds: 90,
   },
   bed: {
@@ -111,7 +304,6 @@ export const RECIPES: Record<RecipeId, RecipeDefinition> = {
     ingredients: { stick: 4, vine: 2, "broad-leaf": 6 },
     tools: ["axe"],
     effect: "build-bed",
-    requiresCamp: true,
     workSeconds: 65,
   },
   spear: {
@@ -131,6 +323,51 @@ export const RECIPES: Record<RecipeId, RecipeDefinition> = {
     requiresCamp: true,
     workSeconds: 50,
   },
+  "cooked-meat": {
+    id: "cooked-meat",
+    label: "烤制猎物肉",
+    ingredients: { "raw-meat": 1 },
+    results: { "cooked-meat": 1 },
+    requiresCamp: true,
+    requiresLitFire: true,
+    workSeconds: 24,
+  },
+  "smoking-rack": {
+    id: "smoking-rack",
+    label: "搭建烟熏架",
+    ingredients: { stick: 4, vine: 3 },
+    tools: ["stone-blade"],
+    effect: "build-smoking-rack",
+    workSeconds: 45,
+  },
+  "rain-collector": {
+    id: "rain-collector",
+    label: "搭建雨水收集架",
+    ingredients: {
+      stick: 6,
+      vine: 4,
+      "broad-leaf": 6,
+      "coconut-shell": 2,
+    },
+    tools: ["stone-blade"],
+    effect: "build-rain-collector",
+    workSeconds: 65,
+  },
+  "torch-waymark": {
+    id: "torch-waymark",
+    label: "搭建火把路标",
+    ingredients: { stick: 4, stone: 3, vine: 1, torch: 1 },
+    effect: "build-torch-waymark",
+    workSeconds: 40,
+  },
+  "split-log": {
+    id: "split-log",
+    label: "劈分原木",
+    ingredients: { log: 1 },
+    tools: ["axe"],
+    results: { stick: 3 },
+    workSeconds: 18,
+  },
 };
 
 export const TASK_SEQUENCE: readonly TaskId[] = [
@@ -139,6 +376,8 @@ export const TASK_SEQUENCE: readonly TaskId[] = [
   "establish-camp",
   "recover-battery",
   "transmit-signal",
+  "river-rising",
+  "canopy-wind",
 ];
 
 export const TASKS: Record<TaskId, TaskDefinition> = {
@@ -147,6 +386,7 @@ export const TASKS: Record<TaskId, TaskDefinition> = {
     label: "先止住血",
     description: "检查伤口，观察坠落点附近能黏合、捆扎的植物。",
     flag: "woundTreated",
+    supportRecipeIds: ["bandage"],
   },
   "purify-water": {
     id: "purify-water",
@@ -172,6 +412,8 @@ export const TASKS: Record<TaskId, TaskDefinition> = {
     description: "把电池带回营地，修复信标并发报。",
     flag: "transmitted",
   },
+  "river-rising": RIVER_RISING_TASK,
+  "canopy-wind": CANOPY_WIND_TASK,
 };
 
 export const WORLD_ENTITY_TEMPLATES: readonly WorldEntityTemplate[] = [
@@ -194,6 +436,129 @@ export const WORLD_ENTITY_TEMPLATES: readonly WorldEntityTemplate[] = [
     contamination: 0.62,
     tags: ["water", "landmark"],
   },
+  {
+    id: RIVER_GAUGE_ID,
+    kind: "landmark",
+    label: "下游旧水尺",
+    position: { ...RIVER_GAUGE_POSITION },
+    interactRadius: 3.1,
+    quantity: 1,
+    tags: [
+      "objective",
+      "landmark",
+      "river-gauge",
+      "repeatable",
+      `blocked-by:${RIVER_GAUGE_OBSTRUCTION_ID}`,
+    ],
+  },
+  {
+    id: RIVER_GAUGE_OBSTRUCTION_ID,
+    kind: "resource",
+    label: "压住水尺入口的倒木",
+    position: {
+      x: RIVER_GAUGE_POSITION.x - 1.35,
+      y: 0,
+      z: RIVER_GAUGE_POSITION.z + 1.35,
+    },
+    interactRadius: 3.2,
+    itemId: "stick",
+    quantity: 0,
+    depleted: false,
+    treeHarvest: {
+      fallDirection: 128,
+      branches: 0,
+      trunkSegments: 1,
+      looseLog: false,
+    },
+    tags: [
+      "objective",
+      "nonrenewable",
+      "standing-tree",
+      "wood",
+      "river-gauge-obstruction",
+    ],
+  },
+  {
+    id: CANOPY_JUNCTION_ID,
+    kind: "landmark",
+    label: "C-17 林下汇线箱",
+    position: { ...CANOPY_JUNCTION_POSITION },
+    interactRadius: 3.2,
+    quantity: 1,
+    tags: [
+      "objective",
+      "landmark",
+      "canopy-junction",
+      "repeatable",
+      `blocked-by:${CANOPY_JUNCTION_OBSTRUCTION_TREE_ID}`,
+      ...CANOPY_JUNCTION_TENSION_VINE_IDS.map((id) => `blocked-by:${id}`),
+    ],
+  },
+  {
+    id: CANOPY_JUNCTION_OBSTRUCTION_TREE_ID,
+    kind: "resource",
+    label: "拉扯 C-17 电缆的倒木",
+    position: {
+      x: CANOPY_JUNCTION_POSITION.x - 1.8,
+      y: 0,
+      z: CANOPY_JUNCTION_POSITION.z + 0.9,
+    },
+    interactRadius: 3.2,
+    itemId: "stick",
+    quantity: 0,
+    depleted: false,
+    treeHarvest: {
+      fallDirection: 164,
+      branches: 2,
+      trunkSegments: 1,
+      looseLog: false,
+    },
+    tags: [
+      "objective",
+      "nonrenewable",
+      "standing-tree",
+      "wood",
+      "canopy-junction-obstruction",
+    ],
+  },
+  ...CANOPY_JUNCTION_TENSION_VINE_IDS.map((id, index) => ({
+    id,
+    kind: "resource" as const,
+    label: "绷紧在 C-17 接头上的藤本",
+    position: {
+      x: CANOPY_JUNCTION_POSITION.x + (index === 0 ? -0.9 : 1.1),
+      y: 0,
+      z: CANOPY_JUNCTION_POSITION.z + (index === 0 ? -0.8 : 0.5),
+    },
+    interactRadius: 2.4,
+    itemId: "vine" as const,
+    quantity: 1,
+    semantic: {
+      generatorVersion: 1,
+      category: "harvestable-plant" as const,
+      species: "fiber-vine",
+      material: "vine-fiber",
+      growthStage: "mature",
+      size: "small" as const,
+      visualVariant: `c17-tension-${index === 0 ? "west" : "east"}`,
+      yaw: index === 0 ? -0.62 : 0.54,
+      scale: 1.15,
+      action: "cut" as const,
+      toolClass: "blade" as const,
+      toolTier: 1 as const,
+      yieldTableId: "authored.c17-tension-vine",
+      primaryMaterial: "vine",
+      yieldMinimum: 1,
+      yieldMaximum: 1,
+      baselineQuantity: 1,
+    },
+    tags: [
+      "objective",
+      "nonrenewable",
+      "canopy-junction-obstruction",
+      "tension-vine",
+    ],
+  })),
   {
     id: "landmark.weather-station",
     kind: "landmark",
@@ -243,12 +608,92 @@ export const WORLD_ENTITY_TEMPLATES: readonly WorldEntityTemplate[] = [
   {
     id: "resource.stone.camp-01",
     kind: "resource",
-    label: "河滩石堆",
+    label: "坠机碎石堆",
     position: { x: 3, y: 0, z: 2 },
     interactRadius: 2.5,
     itemId: "stone",
-    quantity: 4,
+    quantity: 5,
     tags: ["camp", "crafting"],
+  },
+  {
+    id: "resource.stone.river-bank-west-01",
+    kind: "resource",
+    label: "河岸冲刷小石",
+    position: { x: 4, y: 0, z: -12.4 },
+    interactRadius: 2.1,
+    itemId: "stone",
+    quantity: 2,
+    tags: [
+      "water",
+      "river-bank",
+      "crafting",
+      "loose-stone",
+      "guaranteed-early",
+    ],
+  },
+  {
+    id: "resource.stone.river-bank-south-01",
+    kind: "resource",
+    label: "河岸冲刷小石",
+    position: { x: 8, y: 0, z: -19 },
+    interactRadius: 2.1,
+    itemId: "stone",
+    quantity: 2,
+    tags: [
+      "water",
+      "river-bank",
+      "crafting",
+      "loose-stone",
+      "guaranteed-early",
+    ],
+  },
+  {
+    id: "resource.stone.river-bank-east-01",
+    kind: "resource",
+    label: "河岸冲刷小石",
+    position: { x: 18, y: 0, z: -10.3 },
+    interactRadius: 2.1,
+    itemId: "stone",
+    quantity: 2,
+    tags: [
+      "water",
+      "river-bank",
+      "crafting",
+      "loose-stone",
+      "guaranteed-early",
+    ],
+  },
+  {
+    id: "resource.vine.river-approach-01",
+    kind: "resource",
+    label: "风折断落藤条",
+    position: { x: 7, y: 0, z: -8.5 },
+    interactRadius: 2.3,
+    itemId: "vine",
+    quantity: 2,
+    tags: [
+      "water",
+      "river-bank",
+      "crafting",
+      "fallen-vine",
+      "guaranteed-early",
+    ],
+  },
+  {
+    id: "resource.vine.river-east-01",
+    kind: "resource",
+    label: "洪水冲落藤条",
+    position: { x: 25, y: 0, z: -18.2 },
+    interactRadius: 2.3,
+    itemId: "vine",
+    quantity: 2,
+    tags: [
+      "water",
+      "river-bank",
+      "crafting",
+      "fallen-vine",
+      "guaranteed-early",
+    ],
   },
   {
     id: "resource.stick.camp-01",
@@ -259,6 +704,26 @@ export const WORLD_ENTITY_TEMPLATES: readonly WorldEntityTemplate[] = [
     itemId: "stick",
     quantity: 10,
     tags: ["camp", "crafting"],
+  },
+  {
+    id: "resource.tree.camp-east",
+    kind: "resource",
+    label: "可砍伐的轻木",
+    position: { x: 8, y: 0, z: 6 },
+    interactRadius: 3.2,
+    itemId: "stick",
+    quantity: 6,
+    tags: ["camp", "standing-tree", "wood"],
+  },
+  {
+    id: "resource.tree.camp-west",
+    kind: "resource",
+    label: "可砍伐的轻木",
+    position: { x: -9, y: 0, z: 8 },
+    interactRadius: 3.2,
+    itemId: "stick",
+    quantity: 7,
+    tags: ["camp", "standing-tree", "wood"],
   },
   {
     id: "resource.vine.camp-01",
@@ -293,12 +758,32 @@ export const WORLD_ENTITY_TEMPLATES: readonly WorldEntityTemplate[] = [
   {
     id: "resource.dry-leaf.camp-01",
     kind: "resource",
-    label: "岩缝干叶",
+    label: "浅褐色岩缝干叶堆",
     position: { x: -4, y: 0, z: -2 },
     interactRadius: 2.5,
     itemId: "dry-leaf",
     quantity: 5,
-    tags: ["camp", "tinder"],
+    tags: ["camp", "tinder", "guaranteed-early", "rock-shelf"],
+  },
+  {
+    id: "resource.dry-leaf.camp-02",
+    kind: "resource",
+    label: "晒干的棕榈干叶堆",
+    position: { x: 6.5, y: 0, z: 6 },
+    interactRadius: 2.5,
+    itemId: "dry-leaf",
+    quantity: 3,
+    tags: ["camp", "tinder", "guaranteed-early", "palm-litter"],
+  },
+  {
+    id: "resource.dry-leaf.river-approach-01",
+    kind: "resource",
+    label: "倒木背风面的干叶堆",
+    position: { x: 8.5, y: 0, z: -8.5 },
+    interactRadius: 2.5,
+    itemId: "dry-leaf",
+    quantity: 3,
+    tags: ["trail", "tinder", "guaranteed-early", "wind-sheltered"],
   },
   {
     id: "resource.coconut.stream-01",
