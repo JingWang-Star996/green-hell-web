@@ -20,6 +20,8 @@
 /.vinext/
 /out/
 /toy-out/
+/wiki-out/
+/game-dev-handbook-out/
 /.toy-smoke/
 
 # misc
@@ -34,6 +36,7 @@ yarn-error.log*
 /qa-http.*
 /.codex-dev.*.log
 /.mobile-dev.*.log
+/.handbook-http.*
 
 # env files (can opt-in for committing if needed)
 .env*

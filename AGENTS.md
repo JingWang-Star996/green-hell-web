@@ -34,6 +34,7 @@ This guidance applies to the entire repository. Use `$orchestrate-game-dev` for 
 - Package: `npm run build:toy`
 - Lint or static checks: `npm run typecheck` and `npm run lint`
 - Full verification: `npm run verify`
+- Release-candidate verification: `npm run verify:release`
 - Performance capture: no repeatable benchmark is defined yet; do not claim performance results without a recorded protocol.
 
 Fill these from repository evidence. Do not invent commands.

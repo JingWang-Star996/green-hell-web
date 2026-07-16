@@ -1,6 +1,11 @@
 import { access, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
+import {
+  CANONICAL_PLAYER_WIKI_URL,
+  LATEST_GAME_RELEASE,
+} from "../src/game/releaseNotes.ts";
+
 const outputDirectory = path.resolve("toy-out");
 const failures = [];
 
@@ -31,7 +36,8 @@ for (const reference of localReferences) {
 }
 
 const chunkDirectory = path.join(outputDirectory, "_next", "static", "chunks");
-const runtimeName = (await readdir(chunkDirectory)).find((name) => name.startsWith("turbopack-") && name.endsWith(".js"));
+const chunkNames = await readdir(chunkDirectory);
+const runtimeName = chunkNames.find((name) => name.startsWith("turbopack-") && name.endsWith(".js"));
 if (!runtimeName) {
   failures.push("Turbopack runtime chunk is missing");
 } else {
@@ -44,7 +50,11 @@ if (!runtimeName) {
   }
 }
 
-for (const name of await readdir(chunkDirectory)) {
+const javascriptChunks = [];
+for (const name of chunkNames) {
+  if (name.endsWith(".js")) {
+    javascriptChunks.push(await readFile(path.join(chunkDirectory, name), "utf8"));
+  }
   if (!name.endsWith(".css")) continue;
   const css = await readFile(path.join(chunkDirectory, name), "utf8");
   if (/url\(\s*["']?\/(?!\/)/.test(css)) {
@@ -52,9 +62,19 @@ for (const name of await readdir(chunkDirectory)) {
   }
 }
 
+const playerFacingArtifact = `${indexHtml}\n${javascriptChunks.join("\n")}`;
+if (!playerFacingArtifact.includes(CANONICAL_PLAYER_WIKI_URL)) {
+  failures.push(`Toy artifact does not contain the canonical player Wiki URL: ${CANONICAL_PLAYER_WIKI_URL}`);
+}
+if (!playerFacingArtifact.includes(LATEST_GAME_RELEASE.buildId)) {
+  failures.push(`Toy artifact does not contain the latest release build ID: ${LATEST_GAME_RELEASE.buildId}`);
+}
+
 if (failures.length > 0) {
   console.error("Toy build verification failed:\n" + failures.map((failure) => `- ${failure}`).join("\n"));
   process.exit(1);
 }
 
-console.log("Toy build verification passed: the single-page entry closure is location-independent.");
+console.log(
+  `Toy build verification passed: the single-page entry closure is location-independent and contains Wiki/build ${LATEST_GAME_RELEASE.buildId}.`,
+);
